@@ -1,0 +1,36 @@
+import numpy as np
+
+
+def precision_at_k(model, ground_truth, k, user_features=None, item_features=None):
+    """
+    Measure precision at k for model and ground truth.
+
+    Arguments:
+    - lightFM instance model
+    - sparse matrix ground_truth (no_users, no_items)
+    - int k
+
+    Returns:
+    - float precision@k
+    """
+
+    ground_truth = ground_truth.tocsr()
+
+    no_users, no_items = ground_truth.shape
+
+    pid_array = np.arange(no_items, dtype=np.int32)
+
+    precisions = []
+
+    for user_id, row in enumerate(ground_truth):
+        uid_array = np.empty(no_items, dtype=np.int32)
+        uid_array.fill(user_id)
+        predictions = model.predict(uid_array, pid_array, num_threads=4)
+
+        top_k = set(np.argsort(predictions)[:k])
+        true_pids = set(row.indices[row.data == 1])
+
+        if true_pids:
+            precisions.append(len(top_k & true_pids) / float(k))
+
+    return sum(precisions) / len(precisions)

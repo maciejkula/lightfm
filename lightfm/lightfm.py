@@ -5,7 +5,8 @@ import numpy as np
 import scipy.sparse as sp
 
 from .lightfm_fast import (CSRMatrix, FastLightFM,
-                           fit_lightfm, predict_lightfm)
+                           fit_lightfm, predict_lightfm,
+                           fit_warp)
 
 
 class LightFM(object):
@@ -98,7 +99,7 @@ class LightFM(object):
         return user_features, item_features
 
     def fit(self, interactions, user_features=None, item_features=None,
-            epochs=1, num_threads=1, verbose=False):
+            loss='logistic', epochs=1, num_threads=1, verbose=False):
 
         # Discard old results, if any
         self._reset_state()
@@ -111,7 +112,7 @@ class LightFM(object):
                                 verbose=verbose)
 
     def fit_partial(self, interactions, user_features=None, item_features=None,
-                    epochs=1, num_threads=1, verbose=False):
+                    loss='logistic', epochs=1, num_threads=1, verbose=False):
         """
         Fit the model.
 
@@ -124,6 +125,7 @@ class LightFM(object):
         - csr_matrix item_features: array of shape [n_items, n_item_features].
                                     Each row contains that item's weights
                                     over features.
+        - string loss ('logistic', 'warp'): the loss function to use.
         - int epochs: number of epochs to run. Default: 1
         - int num_threads: number of parallel computation threads to use. Should
                            not be higher than the number of physical cores.
@@ -165,11 +167,12 @@ class LightFM(object):
             self._run_epoch(item_features,
                             user_features,
                             interactions,
-                            num_threads)
+                            num_threads,
+                            loss == 'warp')
 
         return self
 
-    def _run_epoch(self, item_features, user_features, interactions, num_threads):
+    def _run_epoch(self, item_features, user_features, interactions, num_threads, warp):
         """
         Run an individual epoch.
         """
@@ -189,17 +192,30 @@ class LightFM(object):
                                    self.no_components)
 
         # Call the estimation routines.
-        fit_lightfm(CSRMatrix(item_features),
-                    CSRMatrix(user_features),
-                    interactions.row,
-                    interactions.col,
-                    interactions.data,
-                    shuffle_indices,
-                    lightfm_data,
-                    self.learning_rate,
-                    self.item_alpha,
-                    self.user_alpha,
-                    num_threads)
+        if warp:
+            fit_warp(CSRMatrix(item_features),
+                     CSRMatrix(user_features),
+                     interactions.row,
+                     interactions.col,
+                     interactions.data,
+                     shuffle_indices,
+                     lightfm_data,
+                     self.learning_rate,
+                     self.item_alpha,
+                     self.user_alpha,
+                     num_threads)
+        else:
+            fit_lightfm(CSRMatrix(item_features),
+                        CSRMatrix(user_features),
+                        interactions.row,
+                        interactions.col,
+                        interactions.data,
+                        shuffle_indices,
+                        lightfm_data,
+                        self.learning_rate,
+                        self.item_alpha,
+                        self.user_alpha,
+                        num_threads)
 
     def predict(self, user_ids, item_ids, item_features=None, user_features=None, num_threads=1):
         """

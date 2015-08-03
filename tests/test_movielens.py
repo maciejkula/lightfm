@@ -8,6 +8,8 @@ import scipy.sparse as sp
 
 from sklearn.metrics import roc_auc_score
 
+from tests.utils import precision_at_k
+
 from lightfm import LightFM
 
 imp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -53,6 +55,42 @@ def test_movielens_accuracy():
 
     assert roc_auc_score(train.data, train_predictions) > 0.84
     assert roc_auc_score(test.data, test_predictions) > 0.76
+
+
+def test_logistic_precision():
+
+    model = LightFM()
+    model.fit_partial(train,
+                      epochs=10)
+
+    train_precision = precision_at_k(model,
+                                     train,
+                                     10)
+    test_precision = precision_at_k(model,
+                                    test,
+                                    10)
+
+    assert train_precision > 0.003
+    assert test_precision > 0.001
+
+
+def test_warp_precision():
+
+    model = LightFM(learning_rate=0.05)
+
+    model.fit_partial(train,
+                      epochs=10,
+                      loss='warp')
+
+    train_precision = precision_at_k(model,
+                                     train,
+                                     10)
+    test_precision = precision_at_k(model,
+                                    test,
+                                    10)
+
+    assert train_precision > 0.3
+    assert test_precision > 0.04
 
 
 def test_movielens_genre_accuracy():

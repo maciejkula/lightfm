@@ -2,11 +2,13 @@
 #cython: boundscheck=False, wraparound=False, cdivision=True, initializedcheck=False
 
 from cython.parallel import parallel, prange
+from libc.stdlib cimport rand
 
 
 cdef extern from "math.h" nogil:
     double sqrt(double)
     double exp(double)
+    double log(double)
 
 
 cdef class CSRMatrix:
@@ -406,6 +408,85 @@ def fit_lightfm(CSRMatrix item_features,
                    learning_rate,
                    item_alpha,
                    user_alpha)
+
+    regularize(lightfm,
+               item_alpha,
+               user_alpha)
+
+
+def fit_warp(CSRMatrix item_features,
+             CSRMatrix user_features,
+             int[::1] user_ids,
+             int[::1] item_ids,
+             int[::1] Y,
+             int[::1] shuffle_indices,
+             FastLightFM lightfm,
+             double learning_rate,
+             double item_alpha,
+             double user_alpha,
+             int num_threads):
+    """
+    """
+
+    cdef int i, no_examples, user_id, positive_item_id, negative_item_id, sampled, row, negative_user_id, negative_row
+    cdef double positive_prediction, negative_prediction, violation, weight
+
+    no_examples = Y.shape[0]
+
+    for i in range(no_examples):
+        row = shuffle_indices[i]
+
+        user_id = user_ids[row]
+        positive_item_id = item_ids[row]
+
+        if not Y[row] == 1:
+            continue
+
+        positive_prediction = compute_prediction(item_features,
+                                                 user_features,
+                                                 user_id,
+                                                 positive_item_id,
+                                                 lightfm)
+        violation = 0
+        sampled = 0
+
+        while sampled < (item_features.rows - 1):
+
+            sampled += 1
+            negative_item_id = rand() % item_features.rows
+
+            if positive_item_id == negative_item_id:
+                break
+
+            negative_prediction = compute_prediction(item_features,
+                                                     user_features,
+                                                     user_id,
+                                                     negative_item_id,
+                                                     lightfm)
+
+            violation = positive_prediction - negative_prediction
+
+            if violation < 0:
+                weight = log((item_features.rows - 1) / sampled)
+                update(weight * (1 + violation),
+                       item_features,
+                       user_features,
+                       user_id,
+                       positive_item_id,
+                       lightfm,
+                       learning_rate,
+                       item_alpha,
+                       user_alpha)
+                update(weight * (1 - violation),
+                       item_features,
+                       user_features,
+                       user_id,
+                       negative_item_id,
+                       lightfm,
+                       learning_rate,
+                       item_alpha,
+                       user_alpha)
+                break
 
     regularize(lightfm,
                item_alpha,
