@@ -133,6 +133,8 @@ class LightFM(object):
         - bool verbose: whether to print progress messages.
         """
 
+        assert loss in ('logistic', 'warp')
+
         # We need this in the COO format.
         # If that's already true, this is a no-op.
         interactions = interactions.tocoo()

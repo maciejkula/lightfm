@@ -8,7 +8,7 @@ import scipy.sparse as sp
 
 from sklearn.metrics import roc_auc_score
 
-from tests.utils import precision_at_k
+from tests.utils import precision_at_k, full_auc
 
 from lightfm import LightFM
 
@@ -70,8 +70,14 @@ def test_logistic_precision():
                                     test,
                                     10)
 
+    full_train_auc = full_auc(model, train)
+    full_test_auc = full_auc(model, test)
+
     assert train_precision > 0.3
     assert test_precision > 0.03
+
+    assert full_train_auc > 0.89
+    assert full_test_auc > 0.89
 
 
 def test_warp_precision():
@@ -89,8 +95,14 @@ def test_warp_precision():
                                     test,
                                     10)
 
+    full_train_auc = full_auc(model, train)
+    full_test_auc = full_auc(model, test)
+
     assert train_precision > 0.45
     assert test_precision > 0.07
+
+    assert full_train_auc > 0.97
+    assert full_test_auc > 0.97
 
 
 def test_movielens_genre_accuracy():
