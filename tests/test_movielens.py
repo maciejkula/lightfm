@@ -70,8 +70,8 @@ def test_logistic_precision():
                                     test,
                                     10)
 
-    assert train_precision > 0.003
-    assert test_precision > 0.001
+    assert train_precision > 0.3
+    assert test_precision > 0.03
 
 
 def test_warp_precision():
@@ -89,8 +89,8 @@ def test_warp_precision():
                                     test,
                                     10)
 
-    assert train_precision > 0.3
-    assert test_precision > 0.04
+    assert train_precision > 0.45
+    assert test_precision > 0.07
 
 
 def test_movielens_genre_accuracy():

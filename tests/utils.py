@@ -27,7 +27,7 @@ def precision_at_k(model, ground_truth, k, user_features=None, item_features=Non
         uid_array.fill(user_id)
         predictions = model.predict(uid_array, pid_array, num_threads=4)
 
-        top_k = set(np.argsort(predictions)[:k])
+        top_k = set(np.argsort(-predictions)[:k])
         true_pids = set(row.indices[row.data == 1])
 
         if true_pids:

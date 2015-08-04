@@ -9,6 +9,7 @@ cdef extern from "math.h" nogil:
     double sqrt(double)
     double exp(double)
     double log(double)
+    double floor(double)
 
 
 cdef class CSRMatrix:
@@ -200,7 +201,7 @@ cdef inline double compute_prediction(CSRMatrix item_features,
     prediction += compute_bias_sum(user_features, lightfm.user_biases,
                                    user_start_index, user_stop_index) * lightfm.user_scale
     
-    return sigmoid(prediction)
+    return prediction
 
 
 cdef inline double update_biases(CSRMatrix feature_indices,
@@ -330,6 +331,81 @@ cdef inline void update(double loss,
     lightfm.user_scale *= (1 - user_alpha * avg_learning_rate)
 
 
+cdef inline void warp_update(double loss,
+                             CSRMatrix item_features,
+                             CSRMatrix user_features,
+                             int user_id,
+                             int positive_item_id,
+                             int negative_item_id,
+                             FastLightFM lightfm,
+                             double learning_rate,
+                             double item_alpha,
+                             double user_alpha) nogil:
+    """
+    Apply the gradient step.
+    """
+
+    cdef int i, j, positive_item_start_index, positive_item_stop_index, user_start_index, user_stop_index
+    cdef int negative_item_start_index, negative_item_stop_index
+    cdef double avg_learning_rate, positive_item_component, negative_item_component, user_component
+
+    avg_learning_rate = 0.0
+
+    # Get the iteration ranges for features
+    # for this training example.
+    positive_item_start_index = item_features.get_row_start(positive_item_id)
+    positive_item_stop_index = item_features.get_row_end(positive_item_id)
+
+    negative_item_start_index = item_features.get_row_start(negative_item_id)
+    negative_item_stop_index = item_features.get_row_end(negative_item_id)
+
+    user_start_index = user_features.get_row_start(user_id)
+    user_stop_index = user_features.get_row_end(user_id)
+
+    avg_learning_rate += update_biases(item_features, positive_item_start_index, positive_item_stop_index,
+                                       lightfm.item_biases, lightfm.item_bias_gradients,
+                                       -loss, learning_rate, item_alpha)
+    avg_learning_rate += update_biases(item_features, negative_item_start_index, negative_item_stop_index,
+                                       lightfm.item_biases, lightfm.item_bias_gradients,
+                                       loss, learning_rate, item_alpha)
+    avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
+                                       lightfm.user_biases, lightfm.user_bias_gradients,
+                                       loss, learning_rate, user_alpha)
+
+    # Update latent representations.
+    for i in range(lightfm.no_components):
+
+        positive_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
+                                               positive_item_start_index, positive_item_stop_index)
+                                               * lightfm.item_scale)
+        negative_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
+                                               negative_item_start_index, negative_item_stop_index)
+                                               * lightfm.item_scale)
+        user_component = (compute_component_sum(user_features, lightfm.user_features, i,
+                                               user_start_index, user_stop_index)
+                         * lightfm.user_scale)
+
+        avg_learning_rate += update_features(item_features, lightfm.item_features, lightfm.item_feature_gradients,
+                                             i, positive_item_start_index, positive_item_stop_index,
+                                             -loss * user_component, learning_rate, item_alpha)
+        avg_learning_rate += update_features(item_features, lightfm.item_features, lightfm.item_feature_gradients,
+                                             i, negative_item_start_index, negative_item_stop_index,
+                                             loss * user_component, learning_rate, item_alpha)
+        avg_learning_rate += update_features(user_features, lightfm.user_features, lightfm.user_feature_gradients,
+                                             i, user_start_index, user_stop_index,
+                                             loss * (negative_item_component - positive_item_component), learning_rate, user_alpha)
+
+
+    avg_learning_rate /= ((lightfm.no_components + 1) * (user_stop_index - user_start_index)
+                          + (lightfm.no_components + 1) * (positive_item_stop_index - positive_item_start_index)
+                          + (lightfm.no_components + 1) * (negative_item_stop_index - negative_item_start_index))
+
+    # Update the scaling factors for lazy regularization, using the average learning rate
+    # of features updated for this example.
+    lightfm.item_scale *= (1 - item_alpha * avg_learning_rate)
+    lightfm.user_scale *= (1 - user_alpha * avg_learning_rate)
+
+
 cdef inline void regularize(FastLightFM lightfm,
                             double item_alpha,
                             double user_alpha) nogil:
@@ -384,11 +460,11 @@ def fit_lightfm(CSRMatrix item_features,
             user_id = user_ids[row]
             item_id = item_ids[row]
 
-            prediction = compute_prediction(item_features,
-                                            user_features,
-                                            user_id,
-                                            item_id,
-                                            lightfm)
+            prediction = sigmoid(compute_prediction(item_features,
+                                                    user_features,
+                                                    user_id,
+                                                    item_id,
+                                                    lightfm))
 
             # Any value less or equal to zero
             # is a negative interaction.
@@ -426,12 +502,17 @@ def fit_warp(CSRMatrix item_features,
              double user_alpha,
              int num_threads):
     """
+    Fit the model using the WARP loss.
     """
 
-    cdef int i, no_examples, user_id, positive_item_id, negative_item_id, sampled, row, negative_user_id, negative_row
+    cdef int i, no_examples, user_id, positive_item_id, gamma, max_sampled
+    cdef int negative_item_id, sampled, row, negative_user_id, negative_row
     cdef double positive_prediction, negative_prediction, violation, weight
 
     no_examples = Y.shape[0]
+    gamma = 10
+
+    max_sampled = item_features.rows / gamma
 
     for i in range(no_examples):
         row = shuffle_indices[i]
@@ -450,7 +531,7 @@ def fit_warp(CSRMatrix item_features,
         violation = 0
         sampled = 0
 
-        while sampled < (item_features.rows - 1):
+        while sampled < max_sampled:
 
             sampled += 1
             negative_item_id = rand() % item_features.rows
@@ -464,28 +545,19 @@ def fit_warp(CSRMatrix item_features,
                                                      negative_item_id,
                                                      lightfm)
 
-            violation = positive_prediction - negative_prediction
-
-            if violation < 0:
-                weight = log((item_features.rows - 1) / sampled)
-                update(weight * (1 + violation),
-                       item_features,
-                       user_features,
-                       user_id,
-                       positive_item_id,
-                       lightfm,
-                       learning_rate,
-                       item_alpha,
-                       user_alpha)
-                update(weight * (1 - violation),
-                       item_features,
-                       user_features,
-                       user_id,
-                       negative_item_id,
-                       lightfm,
-                       learning_rate,
-                       item_alpha,
-                       user_alpha)
+            if negative_prediction > positive_prediction - 1:
+                weight = log(floor((item_features.rows - 1) / sampled))
+                violation = 1 - positive_prediction + negative_prediction
+                warp_update(weight * violation,
+                            item_features,
+                            user_features,
+                            user_id,
+                            positive_item_id,
+                            negative_item_id,
+                            lightfm,
+                            learning_rate,
+                            item_alpha,
+                            user_alpha)
                 break
 
     regularize(lightfm,
