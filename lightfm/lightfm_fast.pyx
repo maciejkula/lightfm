@@ -443,17 +443,17 @@ cdef inline void regularize(FastLightFM lightfm,
     lightfm.user_scale = 1.0
 
 
-def fit_lightfm(CSRMatrix item_features,
-                CSRMatrix user_features,
-                int[::1] user_ids,
-                int[::1] item_ids,
-                int[::1] Y,
-                int[::1] shuffle_indices,
-                FastLightFM lightfm,
-                double learning_rate,
-                double item_alpha,
-                double user_alpha,
-                int num_threads):
+def fit_logistic(CSRMatrix item_features,
+                 CSRMatrix user_features,
+                 int[::1] user_ids,
+                 int[::1] item_ids,
+                 int[::1] Y,
+                 int[::1] shuffle_indices,
+                 FastLightFM lightfm,
+                 double learning_rate,
+                 double item_alpha,
+                 double user_alpha,
+                 int num_threads):
     """
     Fit the LightFM model.
     """
@@ -517,7 +517,7 @@ def fit_warp(CSRMatrix item_features,
     """
 
     cdef int i, no_examples, user_id, positive_item_id, gamma, max_sampled
-    cdef int negative_item_id, sampled, row, negative_user_id, negative_row
+    cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction, violation, weight
 
     no_examples = Y.shape[0]
@@ -525,55 +525,115 @@ def fit_warp(CSRMatrix item_features,
 
     max_sampled = item_features.rows / gamma
 
-    for i in range(no_examples):
-        row = shuffle_indices[i]
+    with nogil:
+        for i in range(no_examples):
+            row = shuffle_indices[i]
 
-        user_id = user_ids[row]
-        positive_item_id = item_ids[row]
+            user_id = user_ids[row]
+            positive_item_id = item_ids[row]
 
-        if not Y[row] == 1:
-            continue
+            if not Y[row] == 1:
+                continue
 
-        positive_prediction = compute_prediction(item_features,
-                                                 user_features,
-                                                 user_id,
-                                                 positive_item_id,
-                                                 lightfm)
-        violation = 0
-        sampled = 0
+            positive_prediction = compute_prediction(item_features,
+                                                     user_features,
+                                                     user_id,
+                                                     positive_item_id,
+                                                     lightfm)
+            violation = 0
+            sampled = 0
 
-        while sampled < max_sampled:
+            while sampled < max_sampled:
 
-            sampled += 1
+                sampled += 1
+                negative_item_id = rand() % item_features.rows
+
+                if positive_item_id == negative_item_id:
+                    break
+
+                negative_prediction = compute_prediction(item_features,
+                                                         user_features,
+                                                         user_id,
+                                                         negative_item_id,
+                                                         lightfm)
+
+                if negative_prediction > positive_prediction - 1:
+                    weight = log(floor((item_features.rows - 1) / sampled))
+                    violation = 1 - positive_prediction + negative_prediction
+                    warp_update(weight * violation,
+                                item_features,
+                                user_features,
+                                user_id,
+                                positive_item_id,
+                                negative_item_id,
+                                lightfm,
+                                learning_rate,
+                                item_alpha,
+                                user_alpha)
+                    break
+
+        regularize(lightfm,
+                   item_alpha,
+                   user_alpha)
+
+
+def fit_bpr(CSRMatrix item_features,
+            CSRMatrix user_features,
+            int[::1] user_ids,
+            int[::1] item_ids,
+            int[::1] Y,
+            int[::1] shuffle_indices,
+            FastLightFM lightfm,
+            double learning_rate,
+            double item_alpha,
+            double user_alpha,
+            int num_threads):
+    """
+    Fit the model using the BPR loss.
+    """
+
+    cdef int i, no_examples, user_id, positive_item_id
+    cdef int negative_item_id, sampled, row
+    cdef double positive_prediction, negative_prediction
+
+    no_examples = Y.shape[0]
+
+    with nogil:
+        for i in range(no_examples):
+            row = shuffle_indices[i]
+
+            if not Y[row] == 1:
+                continue
+
+            user_id = user_ids[row]
+            positive_item_id = item_ids[row]
             negative_item_id = rand() % item_features.rows
 
-            if positive_item_id == negative_item_id:
-                break
-
+            positive_prediction = compute_prediction(item_features,
+                                                     user_features,
+                                                     user_id,
+                                                     positive_item_id,
+                                                     lightfm)
             negative_prediction = compute_prediction(item_features,
                                                      user_features,
                                                      user_id,
                                                      negative_item_id,
                                                      lightfm)
 
-            if negative_prediction > positive_prediction - 1:
-                weight = log(floor((item_features.rows - 1) / sampled))
-                violation = 1 - positive_prediction + negative_prediction
-                warp_update(weight * violation,
-                            item_features,
-                            user_features,
-                            user_id,
-                            positive_item_id,
-                            negative_item_id,
-                            lightfm,
-                            learning_rate,
-                            item_alpha,
-                            user_alpha)
-                break
+            warp_update(sigmoid(positive_prediction - negative_prediction),
+                        item_features,
+                        user_features,
+                        user_id,
+                        positive_item_id,
+                        negative_item_id,
+                        lightfm,
+                        learning_rate,
+                        item_alpha,
+                        user_alpha)
 
-    regularize(lightfm,
-               item_alpha,
-               user_alpha)
+        regularize(lightfm,
+                   item_alpha,
+                   user_alpha)
 
 
 def predict_lightfm(CSRMatrix item_features,

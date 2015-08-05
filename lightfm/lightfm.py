@@ -5,8 +5,8 @@ import numpy as np
 import scipy.sparse as sp
 
 from .lightfm_fast import (CSRMatrix, FastLightFM,
-                           fit_lightfm, predict_lightfm,
-                           fit_warp)
+                           fit_logistic, predict_lightfm,
+                           fit_warp, fit_bpr)
 
 
 class LightFM(object):
@@ -133,7 +133,7 @@ class LightFM(object):
         - bool verbose: whether to print progress messages.
         """
 
-        assert loss in ('logistic', 'warp')
+        assert loss in ('logistic', 'warp', 'bpr')
 
         # We need this in the COO format.
         # If that's already true, this is a no-op.
@@ -170,11 +170,11 @@ class LightFM(object):
                             user_features,
                             interactions,
                             num_threads,
-                            loss == 'warp')
+                            loss)
 
         return self
 
-    def _run_epoch(self, item_features, user_features, interactions, num_threads, warp):
+    def _run_epoch(self, item_features, user_features, interactions, num_threads, loss):
         """
         Run an individual epoch.
         """
@@ -194,7 +194,7 @@ class LightFM(object):
                                    self.no_components)
 
         # Call the estimation routines.
-        if warp:
+        if loss == 'warp':
             fit_warp(CSRMatrix(item_features),
                      CSRMatrix(user_features),
                      interactions.row,
@@ -206,18 +206,30 @@ class LightFM(object):
                      self.item_alpha,
                      self.user_alpha,
                      num_threads)
+        elif loss == 'bpr':
+            fit_bpr(CSRMatrix(item_features),
+                    CSRMatrix(user_features),
+                    interactions.row,
+                    interactions.col,
+                    interactions.data,
+                    shuffle_indices,
+                    lightfm_data,
+                    self.learning_rate,
+                    self.item_alpha,
+                    self.user_alpha,
+                    num_threads)
         else:
-            fit_lightfm(CSRMatrix(item_features),
-                        CSRMatrix(user_features),
-                        interactions.row,
-                        interactions.col,
-                        interactions.data,
-                        shuffle_indices,
-                        lightfm_data,
-                        self.learning_rate,
-                        self.item_alpha,
-                        self.user_alpha,
-                        num_threads)
+            fit_logistic(CSRMatrix(item_features),
+                         CSRMatrix(user_features),
+                         interactions.row,
+                         interactions.col,
+                         interactions.data,
+                         shuffle_indices,
+                         lightfm_data,
+                         self.learning_rate,
+                         self.item_alpha,
+                         self.user_alpha,
+                         num_threads)
 
     def predict(self, user_ids, item_ids, item_features=None, user_features=None, num_threads=1):
         """

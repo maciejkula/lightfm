@@ -80,6 +80,31 @@ def test_logistic_precision():
     assert full_test_auc > 0.89
 
 
+def test_bpr_precision():
+
+    model = LightFM(learning_rate=0.05)
+
+    model.fit_partial(train,
+                      epochs=10,
+                      loss='bpr')
+
+    train_precision = precision_at_k(model,
+                                     train,
+                                     10)
+    test_precision = precision_at_k(model,
+                                    test,
+                                    10)
+
+    full_train_auc = full_auc(model, train)
+    full_test_auc = full_auc(model, test)
+
+    assert train_precision > 0.31
+    assert test_precision > 0.04
+
+    assert full_train_auc > 0.99
+    assert full_test_auc > 0.99
+
+
 def test_warp_precision():
 
     model = LightFM(learning_rate=0.05)
