@@ -74,7 +74,7 @@ cdef class FastLightFM:
     cdef double item_scale
     cdef double user_scale
 
-    def __init__(self, 
+    def __init__(self,
                  double[:, ::1] item_features,
                  double[:, ::1] item_feature_gradients,
                  double[::1] item_biases,
@@ -187,11 +187,11 @@ cdef inline double compute_prediction(CSRMatrix item_features,
     for i in range(lightfm.no_components):
 
         item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                               item_start_index, item_stop_index)
-                         * lightfm.item_scale)
+                                                item_start_index, item_stop_index)
+                          * lightfm.item_scale)
         user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                               user_start_index, user_stop_index)
-                         * lightfm.user_scale)
+                                                user_start_index, user_stop_index)
+                          * lightfm.user_scale)
 
         prediction += item_component * user_component
 
@@ -200,7 +200,7 @@ cdef inline double compute_prediction(CSRMatrix item_features,
                                    item_start_index, item_stop_index) * lightfm.item_scale
     prediction += compute_bias_sum(user_features, lightfm.user_biases,
                                    user_start_index, user_stop_index) * lightfm.user_scale
-    
+
     return prediction
 
 
@@ -225,7 +225,7 @@ cdef inline double update_biases(CSRMatrix feature_indices,
         feature_weight = feature_indices.data[i]
 
         local_learning_rate = learning_rate / sqrt(gradients[feature])
-        biases[feature] -= local_learning_rate * feature_weight * gradient 
+        biases[feature] -= local_learning_rate * feature_weight * gradient
         gradients[feature] += gradient ** 2
 
         # Lazy regularization: scale up by the regularization
@@ -308,19 +308,20 @@ cdef inline void update(double loss,
     for i in range(lightfm.no_components):
 
         item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                               item_start_index, item_stop_index)
-                         * lightfm.item_scale)
+                                                item_start_index, item_stop_index)
+                          * lightfm.item_scale)
         user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                               user_start_index, user_stop_index)
-                         * lightfm.user_scale)
+                                                user_start_index, user_stop_index)
+                          * lightfm.user_scale)
 
-        avg_learning_rate += update_features(item_features, lightfm.item_features, lightfm.item_feature_gradients,
+        avg_learning_rate += update_features(item_features, lightfm.item_features,
+                                             lightfm.item_feature_gradients,
                                              i, item_start_index, item_stop_index,
                                              loss * user_component, learning_rate, item_alpha)
-        avg_learning_rate += update_features(user_features, lightfm.user_features, lightfm.user_feature_gradients,
+        avg_learning_rate += update_features(user_features, lightfm.user_features,
+                                             lightfm.user_feature_gradients,
                                              i, user_start_index, user_stop_index,
                                              loss * item_component, learning_rate, user_alpha)
-
 
     avg_learning_rate /= ((lightfm.no_components + 1) * (user_stop_index - user_start_index)
                           + (lightfm.no_components + 1) * (item_stop_index - item_start_index))
@@ -345,8 +346,8 @@ cdef inline void warp_update(double loss,
     Apply the gradient step.
     """
 
-    cdef int i, j, positive_item_start_index, positive_item_stop_index, user_start_index, user_stop_index
-    cdef int negative_item_start_index, negative_item_stop_index
+    cdef int i, j, positive_item_start_index, positive_item_stop_index
+    cdef int  user_start_index, user_stop_index, negative_item_start_index, negative_item_stop_index
     cdef double avg_learning_rate, positive_item_component, negative_item_component, user_component
 
     avg_learning_rate = 0.0
@@ -362,10 +363,12 @@ cdef inline void warp_update(double loss,
     user_start_index = user_features.get_row_start(user_id)
     user_stop_index = user_features.get_row_end(user_id)
 
-    avg_learning_rate += update_biases(item_features, positive_item_start_index, positive_item_stop_index,
+    avg_learning_rate += update_biases(item_features, positive_item_start_index,
+                                       positive_item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
                                        -loss, learning_rate, item_alpha)
-    avg_learning_rate += update_biases(item_features, negative_item_start_index, negative_item_stop_index,
+    avg_learning_rate += update_biases(item_features, negative_item_start_index,
+                                       negative_item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
                                        loss, learning_rate, item_alpha)
     avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
@@ -376,29 +379,37 @@ cdef inline void warp_update(double loss,
     for i in range(lightfm.no_components):
 
         positive_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                               positive_item_start_index, positive_item_stop_index)
-                                               * lightfm.item_scale)
+                                                         positive_item_start_index,
+                                                         positive_item_stop_index)
+                                   * lightfm.item_scale)
         negative_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                               negative_item_start_index, negative_item_stop_index)
-                                               * lightfm.item_scale)
+                                                         negative_item_start_index,
+                                                         negative_item_stop_index)
+                                   * lightfm.item_scale)
         user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                               user_start_index, user_stop_index)
-                         * lightfm.user_scale)
+                                                user_start_index, user_stop_index)
+                          * lightfm.user_scale)
 
-        avg_learning_rate += update_features(item_features, lightfm.item_features, lightfm.item_feature_gradients,
+        avg_learning_rate += update_features(item_features, lightfm.item_features,
+                                             lightfm.item_feature_gradients,
                                              i, positive_item_start_index, positive_item_stop_index,
                                              -loss * user_component, learning_rate, item_alpha)
-        avg_learning_rate += update_features(item_features, lightfm.item_features, lightfm.item_feature_gradients,
+        avg_learning_rate += update_features(item_features, lightfm.item_features,
+                                             lightfm.item_feature_gradients,
                                              i, negative_item_start_index, negative_item_stop_index,
                                              loss * user_component, learning_rate, item_alpha)
-        avg_learning_rate += update_features(user_features, lightfm.user_features, lightfm.user_feature_gradients,
+        avg_learning_rate += update_features(user_features, lightfm.user_features,
+                                             lightfm.user_feature_gradients,
                                              i, user_start_index, user_stop_index,
-                                             loss * (negative_item_component - positive_item_component), learning_rate, user_alpha)
-
+                                             loss * (negative_item_component -
+                                                     positive_item_component),
+                                             learning_rate, user_alpha)
 
     avg_learning_rate /= ((lightfm.no_components + 1) * (user_stop_index - user_start_index)
-                          + (lightfm.no_components + 1) * (positive_item_stop_index - positive_item_start_index)
-                          + (lightfm.no_components + 1) * (negative_item_stop_index - negative_item_start_index))
+                          + (lightfm.no_components + 1) *
+                          (positive_item_stop_index - positive_item_start_index)
+                          + (lightfm.no_components + 1)
+                          * (negative_item_stop_index - negative_item_start_index))
 
     # Update the scaling factors for lazy regularization, using the average learning rate
     # of features updated for this example.
