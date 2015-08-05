@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import roc_auc_score
 
 
-def precision_at_k(model, ground_truth, k, user_features=None, item_features=None):
+def precision_at_k(model, ground_truth, k):
     """
     Measure precision at k for model and ground truth.
 
@@ -38,7 +38,7 @@ def precision_at_k(model, ground_truth, k, user_features=None, item_features=Non
     return sum(precisions) / len(precisions)
 
 
-def full_auc(model, ground_truth, user_features=None, item_features=None):
+def full_auc(model, ground_truth):
     """
     Measure AUC for model and ground truth on all items.
 
