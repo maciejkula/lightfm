@@ -114,7 +114,21 @@ class LightFM(object):
     def fit_partial(self, interactions, user_features=None, item_features=None,
                     loss='logistic', epochs=1, num_threads=1, verbose=False):
         """
-        Fit the model.
+        Fit the model. Repeated calls to this function will resume training from
+        the point where the last call finished.
+
+        Three loss functions are available:
+        - logistic: useful when both positive (1) and negative (-1) interactions
+                    are present.
+        - BPR: Bayesian Personalised Ranking [1] pairwise loss. Maximises the
+               prediction difference between a positive example and a randomly
+               chosen negative example. Useful when only positive interactions
+               are present and optimising ROC AUC is desired.
+        - WARP: Weighted Approximate-Rank Pairwise [2] loss. Maximises
+                the rank of positive examples by repeatedly sampling negative
+                examples until rank violating one is found. Useful when only
+                positive interactions are present and optimising the top of
+                the recommendation list (precision@k) is desired.
 
         Arguments:
         - coo_matrix interactions: matrix of shape [n_users, n_items] containing
@@ -125,12 +139,18 @@ class LightFM(object):
         - csr_matrix item_features: array of shape [n_items, n_item_features].
                                     Each row contains that item's weights
                                     over features.
-        - string loss ('logistic', 'warp'): the loss function to use.
+        - string loss ('logistic', 'bpr', 'warp'): the loss function to use.
         - int epochs: number of epochs to run. Default: 1
         - int num_threads: number of parallel computation threads to use. Should
                            not be higher than the number of physical cores.
                            Default: 1
         - bool verbose: whether to print progress messages.
+
+        [1] Rendle, Steffen, et al. "BPR: Bayesian personalized ranking from implicit feedback."
+            Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
+            Intelligence. AUAI Press, 2009.
+        [2] Weston, Jason, Samy Bengio, and Nicolas Usunier. "Wsabie: Scaling up to large
+            vocabulary image annotation." IJCAI. Vol. 11. 2011.
         """
 
         assert loss in ('logistic', 'warp', 'bpr')
