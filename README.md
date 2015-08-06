@@ -23,7 +23,7 @@ The details of the approach are described in the LightFM paper, available on [ar
 ## Installation
 Install from pypi using pip: `pip install lightfm`.
 
-## Usage and examples
+## Usage
 Model fitting is very straightforward.
 
 Create a model instance with the desired latent dimensionality
@@ -63,7 +63,11 @@ model = fit(train, epochs=20, num_threads=4)
 predictions = model.predict(test.row, test_col, num_threads=4)
 ```
 
-Check the `examples` directory for more examples. The Movielens example shows how to use `lightfm` on the Movielens dataset, both with and without using movie metadata.
+## Examples
+
+Check the `examples` directory for more examples.
+
+The [Movielens example](/examples/movielens/example.ipynb) shows how to use `lightfm` on the Movielens dataset, both with and without using movie metadata.
 
 ## Development
 Pull requests are welcome. To install for development:
