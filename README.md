@@ -78,5 +78,6 @@ When making changes to the `.pyx` extension files, you'll need to run `python se
 [1] Rendle, Steffen, et al. "BPR: Bayesian personalized ranking from implicit feedback."
 Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
 Intelligence. AUAI Press, 2009.
+
 [2] Weston, Jason, Samy Bengio, and Nicolas Usunier. "Wsabie: Scaling up to large
 vocabulary image annotation." IJCAI. Vol. 11. 2011.
