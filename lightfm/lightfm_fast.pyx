@@ -5,6 +5,9 @@ from cython.parallel import parallel, prange
 from libc.stdlib cimport rand
 
 
+ctypedef float flt
+
+
 cdef extern from "math.h" nogil:
     double sqrt(double)
     double exp(double)
@@ -57,17 +60,17 @@ cdef class FastLightFM:
     Class holding all the model state.
     """
 
-    cdef double[:, ::1] item_features
-    cdef double[:, ::1] item_feature_gradients
+    cdef flt[:, ::1] item_features
+    cdef flt[:, ::1] item_feature_gradients
 
-    cdef double[::1] item_biases
-    cdef double[::1] item_bias_gradients
+    cdef flt[::1] item_biases
+    cdef flt[::1] item_bias_gradients
 
-    cdef double[:, ::1] user_features
-    cdef double[:, ::1] user_feature_gradients
+    cdef flt[:, ::1] user_features
+    cdef flt[:, ::1] user_feature_gradients
 
-    cdef double[::1] user_biases
-    cdef double[::1] user_bias_gradients
+    cdef flt[::1] user_biases
+    cdef flt[::1] user_bias_gradients
 
     cdef int no_components
 
@@ -75,14 +78,14 @@ cdef class FastLightFM:
     cdef double user_scale
 
     def __init__(self,
-                 double[:, ::1] item_features,
-                 double[:, ::1] item_feature_gradients,
-                 double[::1] item_biases,
-                 double[::1] item_bias_gradients,
-                 double[:, ::1] user_features,
-                 double[:, ::1] user_feature_gradients,
-                 double[::1] user_biases,
-                 double[::1] user_bias_gradients,
+                 flt[:, ::1] item_features,
+                 flt[:, ::1] item_feature_gradients,
+                 flt[::1] item_biases,
+                 flt[::1] item_bias_gradients,
+                 flt[:, ::1] user_features,
+                 flt[:, ::1] user_feature_gradients,
+                 flt[::1] user_biases,
+                 flt[::1] user_bias_gradients,
                  int no_components):
 
         self.item_features = item_features
@@ -108,7 +111,7 @@ cdef inline double sigmoid(double v) nogil:
 
 
 cdef inline double compute_component_sum(CSRMatrix feature_indices,
-                                         double[:, ::1] features,
+                                         flt[:, ::1] features,
                                          int component,
                                          int start,
                                          int stop) nogil:
@@ -132,7 +135,7 @@ cdef inline double compute_component_sum(CSRMatrix feature_indices,
 
 
 cdef inline double compute_bias_sum(CSRMatrix feature_indices,
-                                    double[::1] biases,
+                                    flt[::1] biases,
                                     int start,
                                     int stop) nogil:
     """
@@ -207,8 +210,8 @@ cdef inline double compute_prediction(CSRMatrix item_features,
 cdef inline double update_biases(CSRMatrix feature_indices,
                                  int start,
                                  int stop,
-                                 double[::1] biases,
-                                 double[::1] gradients,
+                                 flt[::1] biases,
+                                 flt[::1] gradients,
                                  double gradient,
                                  double learning_rate,
                                  double alpha) nogil:
@@ -238,8 +241,8 @@ cdef inline double update_biases(CSRMatrix feature_indices,
 
 
 cdef inline double update_features(CSRMatrix feature_indices,
-                                   double[:, ::1] features,
-                                   double[:, ::1] gradients,
+                                   flt[:, ::1] features,
+                                   flt[:, ::1] gradients,
                                    int component,
                                    int start,
                                    int stop,
