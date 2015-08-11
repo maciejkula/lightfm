@@ -15,6 +15,7 @@ cdef extern from "math.h" nogil:
     double exp(double)
     double log(double)
     double floor(double)
+    int isfinite(double)
 
 
 cdef extern from "stdlib.h" nogil:
@@ -554,6 +555,12 @@ def fit_warp(CSRMatrix item_features,
                                                      user_id,
                                                      positive_item_id,
                                                      lightfm)
+
+            # Break when predictions are not fininte
+            # to avoid excessive sampling.
+            if isfinite(positive_prediction) == 0:
+                break
+
             violation = 0
             sampled = 0
 
@@ -571,6 +578,9 @@ def fit_warp(CSRMatrix item_features,
                                                          user_id,
                                                          negative_item_id,
                                                          lightfm)
+
+                if isfinite(negative_prediction) == 0:
+                    break
 
                 if negative_prediction > positive_prediction - 1:
                     weight = log(floor((item_features.rows - 1) / sampled))
