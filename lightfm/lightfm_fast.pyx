@@ -1,8 +1,10 @@
 #!python
 #cython: boundscheck=False, wraparound=False, cdivision=True, initializedcheck=False
 
+import numpy as np
 from cython.parallel import parallel, prange
 from libc.stdlib cimport rand
+cimport openmp
 
 
 ctypedef float flt
@@ -13,6 +15,10 @@ cdef extern from "math.h" nogil:
     double exp(double)
     double log(double)
     double floor(double)
+
+
+cdef extern from "stdlib.h" nogil:
+    int rand_r(unsigned int*)
 
 
 cdef class CSRMatrix:
@@ -522,6 +528,11 @@ def fit_warp(CSRMatrix item_features,
     cdef int i, no_examples, user_id, positive_item_id, gamma, max_sampled
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction, violation, weight
+    cdef unsigned int[::1] random_states
+
+    random_states = np.random.randint(0,
+                                      np.iinfo(np.int32).max,
+                                      size=num_threads).astype(np.uint32)
 
     no_examples = Y.shape[0]
     gamma = 10
@@ -529,7 +540,7 @@ def fit_warp(CSRMatrix item_features,
     max_sampled = item_features.rows / gamma
 
     with nogil:
-        for i in range(no_examples):
+        for i in prange(no_examples, num_threads=num_threads):
             row = shuffle_indices[i]
 
             user_id = user_ids[row]
@@ -548,8 +559,9 @@ def fit_warp(CSRMatrix item_features,
 
             while sampled < max_sampled:
 
-                sampled += 1
-                negative_item_id = rand() % item_features.rows
+                sampled = sampled + 1
+                negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
+                                    % item_features.rows)
 
                 if positive_item_id == negative_item_id:
                     break
@@ -598,11 +610,16 @@ def fit_bpr(CSRMatrix item_features,
     cdef int i, no_examples, user_id, positive_item_id
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction
+    cdef unsigned int[::1] random_states
+
+    random_states = np.random.randint(0,
+                                      np.iinfo(np.int32).max,
+                                      size=num_threads).astype(np.uint32)
 
     no_examples = Y.shape[0]
 
     with nogil:
-        for i in range(no_examples):
+        for i in prange(no_examples, num_threads=num_threads):
             row = shuffle_indices[i]
 
             if not Y[row] == 1:
@@ -610,7 +627,8 @@ def fit_bpr(CSRMatrix item_features,
 
             user_id = user_ids[row]
             positive_item_id = item_ids[row]
-            negative_item_id = rand() % item_features.rows
+            negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
+                                % item_features.rows)
 
             positive_prediction = compute_prediction(item_features,
                                                      user_features,
