@@ -15,7 +15,6 @@ cdef extern from "math.h" nogil:
     double exp(double)
     double log(double)
     double floor(double)
-    int isfinite(double)
 
 
 cdef extern from "stdlib.h" nogil:
@@ -529,6 +528,7 @@ def fit_warp(CSRMatrix item_features,
     cdef int i, no_examples, user_id, positive_item_id, gamma, max_sampled
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction, violation, weight
+    cdef double loss, MAX_LOSS
     cdef unsigned int[::1] random_states
 
     random_states = np.random.randint(0,
@@ -537,6 +537,7 @@ def fit_warp(CSRMatrix item_features,
 
     no_examples = Y.shape[0]
     gamma = 10
+    MAX_LOSS = 10.0
 
     max_sampled = item_features.rows / gamma
 
@@ -556,11 +557,6 @@ def fit_warp(CSRMatrix item_features,
                                                      positive_item_id,
                                                      lightfm)
 
-            # Break when predictions are not fininte
-            # to avoid excessive sampling.
-            if isfinite(positive_prediction) == 0:
-                break
-
             violation = 0
             sampled = 0
 
@@ -579,13 +575,15 @@ def fit_warp(CSRMatrix item_features,
                                                          negative_item_id,
                                                          lightfm)
 
-                if isfinite(negative_prediction) == 0:
-                    break
-
                 if negative_prediction > positive_prediction - 1:
                     weight = log(floor((item_features.rows - 1) / sampled))
                     violation = 1 - positive_prediction + negative_prediction
-                    warp_update(weight * violation,
+                    loss = weight * violation
+
+                    if loss > MAX_LOSS:
+                        loss = MAX_LOSS
+
+                    warp_update(loss,
                                 item_features,
                                 user_features,
                                 user_id,

@@ -182,6 +182,21 @@ def test_warp_precision_multithreaded():
     assert full_test_auc > 0.97
 
 
+def test_warp_stability():
+
+    learning_rates = (0.05, 0.1, 0.5)
+
+    for lrate in learning_rates:
+
+        model = LightFM(learning_rate=lrate)
+        model.fit_partial(train,
+                          epochs=10,
+                          loss='warp')
+
+        assert not np.isnan(model.user_embeddings).any()
+        assert not np.isnan(model.item_embeddings).any()
+
+
 def test_movielens_genre_accuracy():
 
     item_features = movielens_data.get_movielens_item_metadata(use_item_ids=False)
