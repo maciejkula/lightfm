@@ -21,6 +21,17 @@ movielens_data = imp.load_source('movielens_data',
                                  imp_path)
 
 
+class PopularityModel(object):
+
+    def __init__(self, data_matrix):
+
+        self.popularity = np.squeeze(np.array(data_matrix.sum(axis=0)))
+
+    def predict(self, uids, pids, num_threads=1):
+
+        return self.popularity
+
+
 def _get_feature_matrices(interactions):
 
     no_users, no_items = interactions.shape
@@ -55,6 +66,27 @@ def test_movielens_accuracy():
 
     assert roc_auc_score(train.data, train_predictions) > 0.84
     assert roc_auc_score(test.data, test_predictions) > 0.76
+
+
+def test_popularity_precision():
+
+    model = PopularityModel(train)
+
+    train_precision = precision_at_k(model,
+                                     train,
+                                     10)
+    test_precision = precision_at_k(model,
+                                    test,
+                                    10)
+
+    full_train_auc = full_auc(model, train)
+    full_test_auc = full_auc(model, test)
+
+    assert train_precision > 0.3
+    assert test_precision > 0.03
+
+    assert full_train_auc > 0.75
+    assert full_test_auc > 0.72
 
 
 def test_logistic_precision():
