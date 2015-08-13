@@ -186,11 +186,11 @@ cdef inline void compute_representation(CSRMatrix features,
                                                    start_index, stop_index)
                              * scale)
 
-    representation[lightfm.no_components + 1] = (compute_bias_sum(features,
-                                                                  feature_biases,
-                                                                  start_index,
-                                                                  stop_index)
-                                                 * scale)
+    representation[lightfm.no_components] = (compute_bias_sum(features,
+                                                              feature_biases,
+                                                              start_index,
+                                                              stop_index)
+                                             * scale)
 
 
 cdef inline flt compute_prediction_from_repr(flt *user_repr,
@@ -201,7 +201,7 @@ cdef inline flt compute_prediction_from_repr(flt *user_repr,
     cdef flt result
 
     # Biases
-    result = user_repr[no_components + 1] + item_repr[no_components + 1]
+    result = user_repr[no_components] + item_repr[no_components]
 
     # Latent factor dot product
     for i in range(no_components):
@@ -332,6 +332,8 @@ cdef inline void update(double loss,
                         CSRMatrix user_features,
                         int user_id,
                         int item_id,
+                        flt *user_repr,
+                        flt *it_repr,
                         FastLightFM lightfm,
                         double learning_rate,
                         double item_alpha,
@@ -363,12 +365,8 @@ cdef inline void update(double loss,
     # Update latent representations.
     for i in range(lightfm.no_components):
 
-        item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                                item_start_index, item_stop_index)
-                          * lightfm.item_scale)
-        user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                                user_start_index, user_stop_index)
-                          * lightfm.user_scale)
+        user_component = user_repr[i]
+        item_component = it_repr[i]
 
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
@@ -394,6 +392,9 @@ cdef inline void warp_update(double loss,
                              int user_id,
                              int positive_item_id,
                              int negative_item_id,
+                             flt *user_repr,
+                             flt *pos_it_repr,
+                             flt *neg_it_repr,
                              FastLightFM lightfm,
                              double learning_rate,
                              double item_alpha,
@@ -434,17 +435,9 @@ cdef inline void warp_update(double loss,
     # Update latent representations.
     for i in range(lightfm.no_components):
 
-        positive_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                                         positive_item_start_index,
-                                                         positive_item_stop_index)
-                                   * lightfm.item_scale)
-        negative_item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                                         negative_item_start_index,
-                                                         negative_item_stop_index)
-                                   * lightfm.item_scale)
-        user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                                user_start_index, user_stop_index)
-                          * lightfm.user_scale)
+        user_component = user_repr[i]
+        positive_item_component = pos_it_repr[i]
+        negative_item_component = neg_it_repr[i]
 
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
@@ -517,21 +510,41 @@ def fit_logistic(CSRMatrix item_features,
     cdef int i, no_examples, user_id, item_id, row
     cdef double prediction, loss
     cdef int y, y_row
+    cdef flt *user_repr
+    cdef flt *it_repr
 
     no_examples = Y.shape[0]
 
-    with nogil:
-        for i in prange(no_examples, num_threads=num_threads):
+    with nogil, parallel(num_threads=num_threads):
+
+        user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+
+        for i in prange(no_examples):
+
             row = shuffle_indices[i]
 
             user_id = user_ids[row]
             item_id = item_ids[row]
 
-            prediction = sigmoid(compute_prediction(item_features,
-                                                    user_features,
-                                                    user_id,
-                                                    item_id,
-                                                    lightfm))
+            compute_representation(user_features,
+                                   lightfm.user_features,
+                                   lightfm.user_biases,
+                                   lightfm,
+                                   user_id,
+                                   lightfm.user_scale,
+                                   user_repr)
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   item_id,
+                                   lightfm.item_scale,
+                                   it_repr)
+
+            prediction = sigmoid(compute_prediction_from_repr(user_repr,
+                                                              it_repr,
+                                                              lightfm.no_components))
 
             # Any value less or equal to zero
             # is a negative interaction.
@@ -547,10 +560,15 @@ def fit_logistic(CSRMatrix item_features,
                    user_features,
                    user_id,
                    item_id,
+                   user_repr,
+                   it_repr,
                    lightfm,
                    learning_rate,
                    item_alpha,
                    user_alpha)
+
+        free(user_repr)
+        free(it_repr)
 
     regularize(lightfm,
                item_alpha,
@@ -662,6 +680,9 @@ def fit_warp(CSRMatrix item_features,
                                 user_id,
                                 positive_item_id,
                                 negative_item_id,
+                                user_repr,
+                                pos_it_repr,
+                                neg_it_repr,
                                 lightfm,
                                 learning_rate,
                                 item_alpha,
@@ -672,9 +693,9 @@ def fit_warp(CSRMatrix item_features,
         free(pos_it_repr)
         free(neg_it_repr)
 
-        regularize(lightfm,
-                   item_alpha,
-                   user_alpha)
+    regularize(lightfm,
+               item_alpha,
+               user_alpha)
 
 
 def fit_bpr(CSRMatrix item_features,
@@ -703,8 +724,13 @@ def fit_bpr(CSRMatrix item_features,
 
     no_examples = Y.shape[0]
 
-    with nogil:
-        for i in prange(no_examples, num_threads=num_threads):
+    with nogil, parallel(num_threads=num_threads):
+
+        user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        pos_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        neg_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+
+        for i in prange(no_examples):
             row = shuffle_indices[i]
 
             if not Y[row] == 1:
@@ -715,16 +741,34 @@ def fit_bpr(CSRMatrix item_features,
             negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
                                 % item_features.rows)
 
-            positive_prediction = compute_prediction(item_features,
-                                                     user_features,
-                                                     user_id,
-                                                     positive_item_id,
-                                                     lightfm)
-            negative_prediction = compute_prediction(item_features,
-                                                     user_features,
-                                                     user_id,
-                                                     negative_item_id,
-                                                     lightfm)
+            compute_representation(user_features,
+                                   lightfm.user_features,
+                                   lightfm.user_biases,
+                                   lightfm,
+                                   user_id,
+                                   lightfm.user_scale,
+                                   user_repr)
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   positive_item_id,
+                                   lightfm.item_scale,
+                                   pos_it_repr)
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   negative_item_id,
+                                   lightfm.item_scale,
+                                   neg_it_repr)
+
+            positive_prediction = compute_prediction_from_repr(user_repr,
+                                                               pos_it_repr,
+                                                               lightfm.no_components)
+            negative_prediction = compute_prediction_from_repr(user_repr,
+                                                               neg_it_repr,
+                                                               lightfm.no_components)
 
             warp_update(sigmoid(positive_prediction - negative_prediction),
                         item_features,
@@ -732,14 +776,21 @@ def fit_bpr(CSRMatrix item_features,
                         user_id,
                         positive_item_id,
                         negative_item_id,
+                        user_repr,
+                        pos_it_repr,
+                        neg_it_repr,
                         lightfm,
                         learning_rate,
                         item_alpha,
                         user_alpha)
 
-        regularize(lightfm,
-                   item_alpha,
-                   user_alpha)
+        free(user_repr)
+        free(pos_it_repr)
+        free(neg_it_repr)
+
+    regularize(lightfm,
+               item_alpha,
+               user_alpha)
 
 
 def predict_lightfm(CSRMatrix item_features,
