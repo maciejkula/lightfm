@@ -108,7 +108,7 @@ cdef class FastLightFM:
         self.user_scale = 1.0
 
 
-cdef inline double sigmoid(double v) nogil:
+cdef inline flt sigmoid(flt v) nogil:
     """
     Compute the sigmoid of v.
     """
@@ -116,7 +116,7 @@ cdef inline double sigmoid(double v) nogil:
     return 1.0 / (1.0 + exp(-v))
 
 
-cdef inline double compute_component_sum(CSRMatrix feature_indices,
+cdef inline flt compute_component_sum(CSRMatrix feature_indices,
                                          flt[:, ::1] features,
                                          int component,
                                          int start,
@@ -126,7 +126,7 @@ cdef inline double compute_component_sum(CSRMatrix feature_indices,
     """
 
     cdef int i, feature
-    cdef double component_sum, feature_weight
+    cdef flt component_sum, feature_weight
 
     component_sum = 0.0
 
@@ -140,7 +140,7 @@ cdef inline double compute_component_sum(CSRMatrix feature_indices,
     return component_sum
 
 
-cdef inline double compute_bias_sum(CSRMatrix feature_indices,
+cdef inline flt compute_bias_sum(CSRMatrix feature_indices,
                                     flt[::1] biases,
                                     int start,
                                     int stop) nogil:
@@ -149,7 +149,7 @@ cdef inline double compute_bias_sum(CSRMatrix feature_indices,
     """
 
     cdef int i, feature
-    cdef double bias_sum, feature_weight
+    cdef flt bias_sum, feature_weight
 
     bias_sum = 0.0
 
@@ -210,11 +210,11 @@ cdef inline flt compute_prediction_from_repr(flt *user_repr,
     return result
 
 
-cdef inline double compute_prediction(CSRMatrix item_features,
-                                      CSRMatrix user_features,
-                                      int user_id,
-                                      int item_id,
-                                      FastLightFM lightfm) nogil:
+cdef inline flt compute_prediction(CSRMatrix item_features,
+                                   CSRMatrix user_features,
+                                   int user_id,
+                                   int item_id,
+                                   FastLightFM lightfm) nogil:
     """
     Compute prediction.
     """
@@ -223,9 +223,9 @@ cdef inline double compute_prediction(CSRMatrix item_features,
     cdef int user_start_index, user_stop_index
     cdef int feature
 
-    cdef double item_component, user_component
-    cdef double prediction
-    cdef double feature_weight
+    cdef flt item_component, user_component
+    cdef flt prediction
+    cdef flt feature_weight
 
     # Get the iteration ranges for features
     # for this training example.
@@ -343,7 +343,8 @@ cdef inline void update(double loss,
     """
 
     cdef int i, j, item_start_index, item_stop_index, user_start_index, user_stop_index
-    cdef double avg_learning_rate, item_component, user_component
+    cdef double avg_learning_rate
+    cdef flt item_component, user_component
 
     avg_learning_rate = 0.0
 
@@ -405,7 +406,8 @@ cdef inline void warp_update(double loss,
 
     cdef int i, j, positive_item_start_index, positive_item_stop_index
     cdef int  user_start_index, user_stop_index, negative_item_start_index, negative_item_stop_index
-    cdef double avg_learning_rate, positive_item_component, negative_item_component, user_component
+    cdef double avg_learning_rate
+    cdef flt positive_item_component, negative_item_component, user_component
 
     avg_learning_rate = 0.0
 
