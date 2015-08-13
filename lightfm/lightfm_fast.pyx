@@ -3,7 +3,7 @@
 
 import numpy as np
 from cython.parallel import parallel, prange
-from libc.stdlib cimport rand
+from libc.stdlib cimport free, malloc
 cimport openmp
 
 
@@ -161,6 +161,53 @@ cdef inline double compute_bias_sum(CSRMatrix feature_indices,
         bias_sum += feature_weight * biases[feature]
 
     return bias_sum
+
+
+cdef inline void compute_representation(CSRMatrix features,
+                                        flt[:, ::1] feature_embeddings,
+                                        flt[::1] feature_biases,
+                                        FastLightFM lightfm,
+                                        int row_id,
+                                        double scale,
+                                        float *representation) nogil:
+    """
+    Compute latent representation for row_id.
+    The last element of the representation is the bias.
+    """
+
+    cdef int i, j, start_index, stop_index
+
+    start_index = features.get_row_start(row_id)
+    stop_index = features.get_row_end(row_id)
+
+    for i in range(lightfm.no_components):
+
+        representation[i] = (compute_component_sum(features, feature_embeddings, i,
+                                                   start_index, stop_index)
+                             * scale)
+
+    representation[lightfm.no_components + 1] = (compute_bias_sum(features,
+                                                                  feature_biases,
+                                                                  start_index,
+                                                                  stop_index)
+                                                 * scale)
+
+
+cdef inline flt compute_prediction_from_repr(flt *user_repr,
+                                             flt *item_repr,
+                                             int no_components) nogil:
+
+    cdef int i
+    cdef flt result
+
+    # Biases
+    result = user_repr[no_components + 1] + item_repr[no_components + 1]
+
+    # Latent factor dot product
+    for i in range(no_components):
+        result += user_repr[i] * item_repr[i]
+
+    return result
 
 
 cdef inline double compute_prediction(CSRMatrix item_features,
@@ -529,6 +576,7 @@ def fit_warp(CSRMatrix item_features,
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction, violation, weight
     cdef double loss, MAX_LOSS
+    cdef flt *representation
     cdef unsigned int[::1] random_states
 
     random_states = np.random.randint(0,
@@ -541,8 +589,13 @@ def fit_warp(CSRMatrix item_features,
 
     max_sampled = item_features.rows / gamma
 
-    with nogil:
-        for i in prange(no_examples, num_threads=num_threads):
+    with nogil, parallel(num_threads=num_threads):
+
+        user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        pos_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        neg_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+
+        for i in prange(no_examples):
             row = shuffle_indices[i]
 
             user_id = user_ids[row]
@@ -551,11 +604,24 @@ def fit_warp(CSRMatrix item_features,
             if not Y[row] == 1:
                 continue
 
-            positive_prediction = compute_prediction(item_features,
-                                                     user_features,
-                                                     user_id,
-                                                     positive_item_id,
-                                                     lightfm)
+            compute_representation(user_features,
+                                   lightfm.user_features,
+                                   lightfm.user_biases,
+                                   lightfm,
+                                   user_id,
+                                   lightfm.user_scale,
+                                   user_repr)
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   positive_item_id,
+                                   lightfm.item_scale,
+                                   pos_it_repr)
+
+            positive_prediction = compute_prediction_from_repr(user_repr,
+                                                               pos_it_repr,
+                                                               lightfm.no_components)
 
             violation = 0
             sampled = 0
@@ -569,11 +635,17 @@ def fit_warp(CSRMatrix item_features,
                 if positive_item_id == negative_item_id:
                     break
 
-                negative_prediction = compute_prediction(item_features,
-                                                         user_features,
-                                                         user_id,
-                                                         negative_item_id,
-                                                         lightfm)
+                compute_representation(item_features,
+                                       lightfm.item_features,
+                                       lightfm.item_biases,
+                                       lightfm,
+                                       negative_item_id,
+                                       lightfm.item_scale,
+                                       neg_it_repr)
+
+                negative_prediction = compute_prediction_from_repr(user_repr,
+                                                                   neg_it_repr,
+                                                                   lightfm.no_components)
 
                 if negative_prediction > positive_prediction - 1:
                     weight = log(floor((item_features.rows - 1) / sampled))
@@ -595,6 +667,10 @@ def fit_warp(CSRMatrix item_features,
                                 item_alpha,
                                 user_alpha)
                     break
+
+        free(user_repr)
+        free(pos_it_repr)
+        free(neg_it_repr)
 
         regularize(lightfm,
                    item_alpha,
