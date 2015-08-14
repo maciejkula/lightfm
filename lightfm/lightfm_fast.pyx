@@ -116,53 +116,6 @@ cdef inline flt sigmoid(flt v) nogil:
     return 1.0 / (1.0 + exp(-v))
 
 
-cdef inline flt compute_component_sum(CSRMatrix feature_indices,
-                                         flt[:, ::1] features,
-                                         int component,
-                                         int start,
-                                         int stop) nogil:
-    """
-    Compute the sum of given features along a given component.
-    """
-
-    cdef int i, feature
-    cdef flt component_sum, feature_weight
-
-    component_sum = 0.0
-
-    for i in range(start, stop):
-
-        feature = feature_indices.indices[i]
-        feature_weight = feature_indices.data[i]
-
-        component_sum += feature_weight * features[feature, component]
-
-    return component_sum
-
-
-cdef inline flt compute_bias_sum(CSRMatrix feature_indices,
-                                    flt[::1] biases,
-                                    int start,
-                                    int stop) nogil:
-    """
-    Compute the sum of bias terms for given features.
-    """
-
-    cdef int i, feature
-    cdef flt bias_sum, feature_weight
-
-    bias_sum = 0.0
-
-    for i in range(start, stop):
-
-        feature = feature_indices.indices[i]
-        feature_weight = feature_indices.data[i]
-
-        bias_sum += feature_weight * biases[feature]
-
-    return bias_sum
-
-
 cdef inline void compute_representation(CSRMatrix features,
                                         flt[:, ::1] feature_embeddings,
                                         flt[::1] feature_biases,
@@ -175,22 +128,25 @@ cdef inline void compute_representation(CSRMatrix features,
     The last element of the representation is the bias.
     """
 
-    cdef int i, j, start_index, stop_index
+    cdef int i, j, start_index, stop_index, feature
+    cdef flt feature_weight
 
     start_index = features.get_row_start(row_id)
     stop_index = features.get_row_end(row_id)
 
-    for i in range(lightfm.no_components):
+    for i in range(lightfm.no_components + 1):
+        representation[i] = 0.0
 
-        representation[i] = (compute_component_sum(features, feature_embeddings, i,
-                                                   start_index, stop_index)
-                             * scale)
+    for i in range(start_index, stop_index):
 
-    representation[lightfm.no_components] = (compute_bias_sum(features,
-                                                              feature_biases,
-                                                              start_index,
-                                                              stop_index)
-                                             * scale)
+        feature = features.indices[i]
+        feature_weight = features.data[i] * scale
+
+        for j in range(lightfm.no_components):
+
+            representation[j] += feature_weight * feature_embeddings[feature, j]
+
+        representation[lightfm.no_components] += feature_weight * feature_biases[feature]
 
 
 cdef inline flt compute_prediction_from_repr(flt *user_repr,
@@ -208,56 +164,6 @@ cdef inline flt compute_prediction_from_repr(flt *user_repr,
         result += user_repr[i] * item_repr[i]
 
     return result
-
-
-cdef inline flt compute_prediction(CSRMatrix item_features,
-                                   CSRMatrix user_features,
-                                   int user_id,
-                                   int item_id,
-                                   FastLightFM lightfm) nogil:
-    """
-    Compute prediction.
-    """
-
-    cdef int i, j, item_start_index, item_stop_index
-    cdef int user_start_index, user_stop_index
-    cdef int feature
-
-    cdef flt item_component, user_component
-    cdef flt prediction
-    cdef flt feature_weight
-
-    # Get the iteration ranges for features
-    # for this training example.
-    item_start_index = item_features.get_row_start(item_id)
-    item_stop_index = item_features.get_row_end(item_id)
-
-    user_start_index = user_features.get_row_start(user_id)
-    user_stop_index = user_features.get_row_end(user_id)
-
-    # Initialize prediction.
-    prediction = 0.0
-
-    # Add the inner product of feature blocks. Results are
-    # scaled down by accumulated lazy regularization.
-    for i in range(lightfm.no_components):
-
-        item_component = (compute_component_sum(item_features, lightfm.item_features, i,
-                                                item_start_index, item_stop_index)
-                          * lightfm.item_scale)
-        user_component = (compute_component_sum(user_features, lightfm.user_features, i,
-                                                user_start_index, user_stop_index)
-                          * lightfm.user_scale)
-
-        prediction += item_component * user_component
-
-    # Add biases. Scaled down by lazy regularization.
-    prediction += compute_bias_sum(item_features, lightfm.item_biases,
-                                   item_start_index, item_stop_index) * lightfm.item_scale
-    prediction += compute_bias_sum(user_features, lightfm.user_biases,
-                                   user_start_index, user_stop_index) * lightfm.user_scale
-
-    return prediction
 
 
 cdef inline double update_biases(CSRMatrix feature_indices,
@@ -807,13 +713,33 @@ def predict_lightfm(CSRMatrix item_features,
     """
 
     cdef int i, no_examples
+    cdef flt *user_repr
+    cdef flt *it_repr
 
     no_examples = predictions.shape[0]
 
-    with nogil:
-        for i in prange(no_examples, num_threads=num_threads):
-            predictions[i] = compute_prediction(item_features,
-                                                user_features,
-                                                user_ids[i],
-                                                item_ids[i],
-                                                lightfm)
+    with nogil, parallel(num_threads=num_threads):
+
+        user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+
+        for i in prange(no_examples):
+
+            compute_representation(user_features,
+                                   lightfm.user_features,
+                                   lightfm.user_biases,
+                                   lightfm,
+                                   user_ids[i],
+                                   lightfm.user_scale,
+                                   user_repr)
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   item_ids[i],
+                                   lightfm.item_scale,
+                                   it_repr)
+
+            predictions[i] = compute_prediction_from_repr(user_repr,
+                                                          it_repr,
+                                                          lightfm.no_components)
