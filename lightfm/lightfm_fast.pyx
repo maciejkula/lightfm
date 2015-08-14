@@ -181,6 +181,8 @@ cdef inline double update_biases(CSRMatrix feature_indices,
     cdef int i, feature
     cdef double feature_weight, local_learning_rate, sum_learning_rate
 
+    sum_learning_rate = 0.0
+
     for i in range(start, stop):
 
         feature = feature_indices.indices[i]
@@ -214,6 +216,8 @@ cdef inline double update_features(CSRMatrix feature_indices,
 
     cdef int i, feature,
     cdef double feature_weight, local_learning_rate, sum_learning_rate
+
+    sum_learning_rate = 0.0
 
     for i in range(start, stop):
 
