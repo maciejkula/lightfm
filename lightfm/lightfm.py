@@ -6,17 +6,18 @@ import scipy.sparse as sp
 
 from .lightfm_fast import (CSRMatrix, FastLightFM,
                            fit_logistic, predict_lightfm,
-                           fit_warp, fit_bpr)
+                           fit_warp, fit_bpr, fit_warp_kos)
 
 
 class LightFM(object):
 
-    def __init__(self, no_components=10, learning_rate=0.05, item_alpha=0.0, user_alpha=0.0):
+    def __init__(self, no_components=10, k=5, learning_rate=0.05, item_alpha=0.0, user_alpha=0.0):
         """
         Initialise the model.
 
         Parameters:
         - integer no_components: the dimensionality of the feature latent embeddings. Default: 10
+        - int k: for k-OS training. Default: 5
         - float learning_rate: initial learning rate. Default: 0.05
         - float item_alpha: L2 penalty on item features. Default: 0.0
         - float user_alpha: L2 penalty on user features. Default: 0.0
@@ -25,9 +26,12 @@ class LightFM(object):
         assert item_alpha >= 0.0
         assert user_alpha >= 0.0
         assert no_components > 0
+        assert k > 0
 
         self.no_components = no_components
         self.learning_rate = learning_rate
+
+        self.k = k
 
         self.item_alpha = item_alpha
         self.user_alpha = user_alpha
@@ -153,7 +157,7 @@ class LightFM(object):
             vocabulary image annotation." IJCAI. Vol. 11. 2011.
         """
 
-        assert loss in ('logistic', 'warp', 'bpr')
+        assert loss in ('logistic', 'warp', 'bpr', 'warp-kos')
 
         # We need this in the COO format.
         # If that's already true, this is a no-op.
@@ -238,6 +242,20 @@ class LightFM(object):
                     self.item_alpha,
                     self.user_alpha,
                     num_threads)
+        elif loss == 'warp-kos':
+            user_ids = np.arange(interactions.shape[0],
+                                 dtype=np.int32)
+            np.random.shuffle(user_ids)
+            fit_warp_kos(CSRMatrix(item_features),
+                         CSRMatrix(user_features),
+                         CSRMatrix(interactions.tocsr()),
+                         user_ids,
+                         lightfm_data,
+                         self.learning_rate,
+                         self.item_alpha,
+                         self.user_alpha,
+                         self.k,
+                         num_threads)
         else:
             fit_logistic(CSRMatrix(item_features),
                          CSRMatrix(user_features),

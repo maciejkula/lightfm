@@ -19,6 +19,42 @@ cdef extern from "math.h" nogil:
 
 cdef extern from "stdlib.h" nogil:
     int rand_r(unsigned int*)
+    ctypedef void const_void "const void"
+    void qsort(void *base, int nmemb, int size,
+               int(*compar)(const_void *, const_void *)) nogil
+
+
+cdef int sample_range(int min_val, int max_val, unsigned int *seed) nogil:
+
+    cdef int val_range
+
+    val_range = max_val - min_val
+
+    return min_val + (rand_r(seed) % val_range)
+
+
+cdef int int_min(int x, int y) nogil:
+
+    if x < y:
+        return x
+    else:
+        return y
+
+
+cdef struct Pair:
+    int idx
+    flt val
+
+
+cdef int reverse_pair_compare(const_void *a, const_void *b) nogil:
+
+    cdef flt diff
+
+    diff = ((<Pair*>a)).val - ((<Pair*>b)).val
+    if diff < 0:
+        return 1
+    else:
+        return -1
 
 
 cdef class CSRMatrix:
@@ -506,7 +542,9 @@ def fit_warp(CSRMatrix item_features,
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction, violation, weight
     cdef double loss, MAX_LOSS
-    cdef flt *representation
+    cdef flt *user_repr
+    cdef flt *pos_it_repr
+    cdef flt *neg_it_repr
     cdef unsigned int[::1] random_states
 
     random_states = np.random.randint(0,
@@ -610,6 +648,163 @@ def fit_warp(CSRMatrix item_features,
                user_alpha)
 
 
+def fit_warp_kos(CSRMatrix item_features,
+                 CSRMatrix user_features,
+                 CSRMatrix data,
+                 int[::1] user_ids,
+                 FastLightFM lightfm,
+                 double learning_rate,
+                 double item_alpha,
+                 double user_alpha,
+                 int k,
+                 int num_threads):
+    """
+    Fit the model using the WARP loss.
+    """
+
+    cdef int i, j, no_examples, user_id, positive_item_id, gamma, max_sampled
+    cdef int negative_item_id, sampled, row, sampled_positive_item_id
+    cdef int user_pids_start, user_pids_stop, no_positives, POS_SAMPLES
+    cdef double positive_prediction, negative_prediction, violation, weight
+    cdef double loss, MAX_LOSS, sampled_positive_prediction
+    cdef flt *user_repr
+    cdef flt *pos_it_repr
+    cdef flt *neg_it_repr
+    cdef Pair *pos_pairs
+    cdef unsigned int[::1] random_states
+
+    random_states = np.random.randint(0,
+                                      np.iinfo(np.int32).max,
+                                      size=num_threads).astype(np.uint32)
+
+    no_examples = user_ids.shape[0]
+    gamma = 10
+    MAX_LOSS = 10.0
+    POS_SAMPLES = 5
+
+    max_sampled = item_features.rows / gamma
+
+    with nogil, parallel(num_threads=num_threads):
+
+        user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        pos_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        neg_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
+        pos_pairs = <Pair*>malloc(sizeof(Pair) * POS_SAMPLES)
+
+        for i in prange(no_examples):
+            user_id = user_ids[i]
+
+            compute_representation(user_features,
+                                   lightfm.user_features,
+                                   lightfm.user_biases,
+                                   lightfm,
+                                   user_id,
+                                   lightfm.user_scale,
+                                   user_repr)
+
+            user_pids_start = data.get_row_start(user_id)
+            user_pids_stop = data.get_row_end(user_id)
+
+            if user_pids_stop == user_pids_start:
+                continue
+
+            # Sample k-th positive item
+            no_positives = int_min(POS_SAMPLES, user_pids_stop - user_pids_start)
+            for j in range(no_positives):
+                sampled_positive_item_id = data.indices[sample_range(user_pids_start,
+                                                                     user_pids_stop,
+                                                                     &random_states[openmp.omp_get_thread_num()])]
+
+                compute_representation(item_features,
+                                       lightfm.item_features,
+                                       lightfm.item_biases,
+                                       lightfm,
+                                       sampled_positive_item_id,
+                                       lightfm.item_scale,
+                                       pos_it_repr)
+
+                sampled_positive_prediction = compute_prediction_from_repr(user_repr,
+                                                                           pos_it_repr,
+                                                                           lightfm.no_components)
+
+                pos_pairs[j].idx = sampled_positive_item_id
+                pos_pairs[j].val = sampled_positive_prediction
+
+            qsort(pos_pairs,
+                  no_positives,
+                  sizeof(Pair),
+                  reverse_pair_compare)
+
+            positive_item_id = pos_pairs[int_min(k, no_positives) - 1].idx
+            positive_prediction = pos_pairs[int_min(k, no_positives) - 1].val
+
+            compute_representation(item_features,
+                                   lightfm.item_features,
+                                   lightfm.item_biases,
+                                   lightfm,
+                                   positive_item_id,
+                                   lightfm.item_scale,
+                                   pos_it_repr)
+
+            # Move on to the WARP step
+            violation = 0
+            sampled = 0
+
+            while sampled < max_sampled:
+
+                sampled = sampled + 1
+                negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
+                                    % item_features.rows)
+
+                if positive_item_id == negative_item_id:
+                    break
+
+                compute_representation(item_features,
+                                       lightfm.item_features,
+                                       lightfm.item_biases,
+                                       lightfm,
+                                       negative_item_id,
+                                       lightfm.item_scale,
+                                       neg_it_repr)
+
+                negative_prediction = compute_prediction_from_repr(user_repr,
+                                                                   neg_it_repr,
+                                                                   lightfm.no_components)
+
+                if negative_prediction > positive_prediction - 1:
+                    weight = log(floor((item_features.rows - 1) / sampled))
+                    violation = 1 - positive_prediction + negative_prediction
+                    loss = weight * violation
+
+                    # Clip gradients for numerical stability.
+                    if loss > MAX_LOSS:
+                        loss = MAX_LOSS
+
+                    warp_update(loss,
+                                item_features,
+                                user_features,
+                                user_id,
+                                positive_item_id,
+                                negative_item_id,
+                                user_repr,
+                                pos_it_repr,
+                                neg_it_repr,
+                                lightfm,
+                                learning_rate,
+                                item_alpha,
+                                user_alpha)
+                    break
+
+        free(user_repr)
+        free(pos_it_repr)
+        free(neg_it_repr)
+        free(pos_pairs)
+
+    regularize(lightfm,
+               item_alpha,
+               user_alpha)
+
+
 def fit_bpr(CSRMatrix item_features,
             CSRMatrix user_features,
             int[::1] user_ids,
@@ -629,6 +824,9 @@ def fit_bpr(CSRMatrix item_features,
     cdef int negative_item_id, sampled, row
     cdef double positive_prediction, negative_prediction
     cdef unsigned int[::1] random_states
+    cdef flt *user_repr
+    cdef flt *pos_it_repr
+    cdef flt *neg_it_repr
 
     random_states = np.random.randint(0,
                                       np.iinfo(np.int32).max,
