@@ -663,7 +663,7 @@ def fit_warp_kos(CSRMatrix item_features,
     """
 
     cdef int i, j, no_examples, user_id, positive_item_id, gamma, max_sampled
-    cdef int negative_item_id, sampled, row, sampled_positive_item_id
+    cdef int negative_item_id, sampled, row, sampled_positive_item_id, is_positive
     cdef int user_pids_start, user_pids_stop, no_positives, POS_SAMPLES
     cdef double positive_prediction, negative_prediction, violation, weight
     cdef double loss, MAX_LOSS, sampled_positive_prediction
@@ -756,8 +756,13 @@ def fit_warp_kos(CSRMatrix item_features,
                 negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
                                     % item_features.rows)
 
-                if positive_item_id == negative_item_id:
-                    break
+                is_positive = 0
+                for j in range(user_pids_start, user_pids_stop):
+                    if negative_item_id == data.indices[j]:
+                        is_positive = 1
+
+                if is_positive == 1:
+                    continue
 
                 compute_representation(item_features,
                                        lightfm.item_features,
