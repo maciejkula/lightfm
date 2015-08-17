@@ -152,6 +152,20 @@ cdef inline flt sigmoid(flt v) nogil:
     return 1.0 / (1.0 + exp(-v))
 
 
+cdef inline int in_positives(int item_id, int user_id, CSRMatrix interactions) nogil:
+
+    cdef int i, start_idx, stop_idx
+
+    start_idx = interactions.get_row_start(user_id)
+    stop_idx = interactions.get_row_end(user_id)
+
+    for i in range(start_idx, stop_idx):
+        if item_id == interactions.indices[i]:
+            return 1
+
+    return 0
+
+
 cdef inline void compute_representation(CSRMatrix features,
                                         flt[:, ::1] feature_embeddings,
                                         flt[::1] feature_biases,
@@ -525,6 +539,7 @@ def fit_logistic(CSRMatrix item_features,
 
 def fit_warp(CSRMatrix item_features,
              CSRMatrix user_features,
+             CSRMatrix interactions,
              int[::1] user_ids,
              int[::1] item_ids,
              int[::1] Y,
@@ -600,9 +615,6 @@ def fit_warp(CSRMatrix item_features,
                 negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
                                     % item_features.rows)
 
-                if positive_item_id == negative_item_id:
-                    break
-
                 compute_representation(item_features,
                                        lightfm.item_features,
                                        lightfm.item_biases,
@@ -616,6 +628,11 @@ def fit_warp(CSRMatrix item_features,
                                                                    lightfm.no_components)
 
                 if negative_prediction > positive_prediction - 1:
+
+                    # Sample again if the sample negative is actually a positive
+                    if in_positives(negative_item_id, user_id, interactions):
+                        continue
+                    
                     weight = log(floor((item_features.rows - 1) / sampled))
                     violation = 1 - positive_prediction + negative_prediction
                     loss = weight * violation
@@ -657,13 +674,14 @@ def fit_warp_kos(CSRMatrix item_features,
                  double item_alpha,
                  double user_alpha,
                  int k,
+                 int n,
                  int num_threads):
     """
     Fit the model using the WARP loss.
     """
 
     cdef int i, j, no_examples, user_id, positive_item_id, gamma, max_sampled
-    cdef int negative_item_id, sampled, row, sampled_positive_item_id, is_positive
+    cdef int negative_item_id, sampled, row, sampled_positive_item_id
     cdef int user_pids_start, user_pids_stop, no_positives, POS_SAMPLES
     cdef double positive_prediction, negative_prediction, violation, weight
     cdef double loss, MAX_LOSS, sampled_positive_prediction
@@ -680,7 +698,6 @@ def fit_warp_kos(CSRMatrix item_features,
     no_examples = user_ids.shape[0]
     gamma = 10
     MAX_LOSS = 10.0
-    POS_SAMPLES = 5
 
     max_sampled = item_features.rows / gamma
 
@@ -689,7 +706,7 @@ def fit_warp_kos(CSRMatrix item_features,
         user_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
         pos_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
         neg_it_repr = <flt *>malloc(sizeof(flt) * (lightfm.no_components + 1))
-        pos_pairs = <Pair*>malloc(sizeof(Pair) * POS_SAMPLES)
+        pos_pairs = <Pair*>malloc(sizeof(Pair) * n)
 
         for i in prange(no_examples):
             user_id = user_ids[i]
@@ -709,7 +726,7 @@ def fit_warp_kos(CSRMatrix item_features,
                 continue
 
             # Sample k-th positive item
-            no_positives = int_min(POS_SAMPLES, user_pids_stop - user_pids_start)
+            no_positives = int_min(n, user_pids_stop - user_pids_start)
             for j in range(no_positives):
                 sampled_positive_item_id = data.indices[sample_range(user_pids_start,
                                                                      user_pids_stop,
@@ -756,14 +773,6 @@ def fit_warp_kos(CSRMatrix item_features,
                 negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
                                     % item_features.rows)
 
-                is_positive = 0
-                for j in range(user_pids_start, user_pids_stop):
-                    if negative_item_id == data.indices[j]:
-                        is_positive = 1
-
-                if is_positive == 1:
-                    continue
-
                 compute_representation(item_features,
                                        lightfm.item_features,
                                        lightfm.item_biases,
@@ -777,6 +786,10 @@ def fit_warp_kos(CSRMatrix item_features,
                                                                    lightfm.no_components)
 
                 if negative_prediction > positive_prediction - 1:
+
+                    if in_positives(negative_item_id, user_id, data):
+                        continue
+
                     weight = log(floor((item_features.rows - 1) / sampled))
                     violation = 1 - positive_prediction + negative_prediction
                     loss = weight * violation
@@ -812,6 +825,7 @@ def fit_warp_kos(CSRMatrix item_features,
 
 def fit_bpr(CSRMatrix item_features,
             CSRMatrix user_features,
+            CSRMatrix interactions,
             int[::1] user_ids,
             int[::1] item_ids,
             int[::1] Y,
@@ -853,8 +867,12 @@ def fit_bpr(CSRMatrix item_features,
 
             user_id = user_ids[row]
             positive_item_id = item_ids[row]
-            negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
-                                % item_features.rows)
+
+            while True:
+                negative_item_id = (rand_r(&random_states[openmp.omp_get_thread_num()])
+                                    % item_features.rows)
+                if not in_positives(negative_item_id, user_id, interactions):
+                    break
 
             compute_representation(user_features,
                                    lightfm.user_features,

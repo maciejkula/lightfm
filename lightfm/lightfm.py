@@ -11,7 +11,7 @@ from .lightfm_fast import (CSRMatrix, FastLightFM,
 
 class LightFM(object):
 
-    def __init__(self, no_components=10, k=5, learning_rate=0.05, item_alpha=0.0, user_alpha=0.0):
+    def __init__(self, no_components=10, k=5, n=10, learning_rate=0.05, item_alpha=0.0, user_alpha=0.0):
         """
         Initialise the model.
 
@@ -27,11 +27,13 @@ class LightFM(object):
         assert user_alpha >= 0.0
         assert no_components > 0
         assert k > 0
+        assert n > 0
 
         self.no_components = no_components
         self.learning_rate = learning_rate
 
-        self.k = k
+        self.k = int(k)
+        self.n = int(n)
 
         self.item_alpha = item_alpha
         self.user_alpha = user_alpha
@@ -221,6 +223,7 @@ class LightFM(object):
         if loss == 'warp':
             fit_warp(CSRMatrix(item_features),
                      CSRMatrix(user_features),
+                     CSRMatrix(interactions.tocsr()),
                      interactions.row,
                      interactions.col,
                      interactions.data,
@@ -233,6 +236,7 @@ class LightFM(object):
         elif loss == 'bpr':
             fit_bpr(CSRMatrix(item_features),
                     CSRMatrix(user_features),
+                    CSRMatrix(interactions.tocsr()),
                     interactions.row,
                     interactions.col,
                     interactions.data,
@@ -255,6 +259,7 @@ class LightFM(object):
                          self.item_alpha,
                          self.user_alpha,
                          self.k,
+                         self.n,
                          num_threads)
         else:
             fit_logistic(CSRMatrix(item_features),
