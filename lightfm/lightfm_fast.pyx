@@ -104,15 +104,19 @@ cdef class FastLightFM:
 
     cdef flt[:, ::1] item_features
     cdef flt[:, ::1] item_feature_gradients
+    cdef flt[:, ::1] item_feature_momentum
 
     cdef flt[::1] item_biases
     cdef flt[::1] item_bias_gradients
+    cdef flt[::1] item_bias_momentum
 
     cdef flt[:, ::1] user_features
     cdef flt[:, ::1] user_feature_gradients
+    cdef flt[:, ::1] user_feature_momentum
 
     cdef flt[::1] user_biases
     cdef flt[::1] user_bias_gradients
+    cdef flt[::1] user_bias_momentum
 
     cdef int no_components
 
@@ -122,22 +126,30 @@ cdef class FastLightFM:
     def __init__(self,
                  flt[:, ::1] item_features,
                  flt[:, ::1] item_feature_gradients,
+                 flt[:, ::1] item_feature_momentum,
                  flt[::1] item_biases,
                  flt[::1] item_bias_gradients,
+                 flt[::1] item_bias_momentum,
                  flt[:, ::1] user_features,
                  flt[:, ::1] user_feature_gradients,
+                 flt[:, ::1] user_feature_momentum,
                  flt[::1] user_biases,
                  flt[::1] user_bias_gradients,
+                 flt[::1] user_bias_momentum,
                  int no_components):
 
         self.item_features = item_features
         self.item_feature_gradients = item_feature_gradients
+        self.item_feature_momentum = item_feature_momentum
         self.item_biases = item_biases
         self.item_bias_gradients = item_bias_gradients
+        self.item_bias_momentum = item_bias_momentum
         self.user_features = user_features
         self.user_feature_gradients = user_feature_gradients
+        self.user_feature_momentum = user_feature_momentum
         self.user_biases = user_biases
         self.user_bias_gradients = user_bias_gradients
+        self.user_bias_momentum = user_bias_momentum
 
         self.no_components = no_components
         self.item_scale = 1.0
@@ -221,9 +233,11 @@ cdef inline double update_biases(CSRMatrix feature_indices,
                                  int stop,
                                  flt[::1] biases,
                                  flt[::1] gradients,
+                                 flt[::1] momentum,
                                  double gradient,
                                  double learning_rate,
-                                 double alpha) nogil:
+                                 double alpha,
+                                 int t) nogil:
     """
     Perform a SGD update of the bias terms.
     """
@@ -239,8 +253,9 @@ cdef inline double update_biases(CSRMatrix feature_indices,
         feature_weight = feature_indices.data[i]
 
         local_learning_rate = learning_rate / sqrt(gradients[feature])
-        biases[feature] -= local_learning_rate * feature_weight * gradient
-        gradients[feature] += gradient ** 2
+        momentum[feature] = 0.99 * momentum[feature] + (1 - 0.99) * gradient
+        biases[feature] -= local_learning_rate * feature_weight * momentum[feature]
+        gradients[feature] = 0.999 * gradients[feature] + (1 - 0.999) * gradient ** 2
 
         # Lazy regularization: scale up by the regularization
         # parameter.
@@ -254,12 +269,14 @@ cdef inline double update_biases(CSRMatrix feature_indices,
 cdef inline double update_features(CSRMatrix feature_indices,
                                    flt[:, ::1] features,
                                    flt[:, ::1] gradients,
+                                   flt[:, ::1] momentum,
                                    int component,
                                    int start,
                                    int stop,
                                    double gradient,
                                    double learning_rate,
-                                   double alpha) nogil:
+                                   double alpha
+                                   int t) nogil:
     """
     Update feature vectors.
     """
@@ -274,9 +291,10 @@ cdef inline double update_features(CSRMatrix feature_indices,
         feature = feature_indices.indices[i]
         feature_weight = feature_indices.data[i]
 
-        local_learning_rate = learning_rate / sqrt(gradients[feature, component])
-        features[feature, component] -= local_learning_rate * feature_weight * gradient
-        gradients[feature, component] += gradient ** 2
+        local_learning_rate = learning_rate / sqrt(gradients[feature, component]) + 0.00000001
+        momentum[feature, component] = 0.99 * momentum[feature, component] + (1 - 0.99) * gradient
+        features[feature, component] -= local_learning_rate * feature_weight * momentum[feature, component]
+        gradients[feature, component] = 0.999 * gradients[feature, component] + (1 - 0.999) * gradient ** 2
 
         # Lazy regularization: scale up by the regularization
         # parameter.
@@ -318,9 +336,11 @@ cdef inline void update(double loss,
 
     avg_learning_rate += update_biases(item_features, item_start_index, item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
+                                       lightfm.item_bias_momentum,
                                        loss, learning_rate, item_alpha)
     avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
                                        lightfm.user_biases, lightfm.user_bias_gradients,
+                                       lightfm.user_bias_momentum,
                                        loss, learning_rate, user_alpha)
 
     # Update latent representations.
@@ -331,10 +351,12 @@ cdef inline void update(double loss,
 
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
+                                             lightfm.item_feature_momentum,
                                              i, item_start_index, item_stop_index,
                                              loss * user_component, learning_rate, item_alpha)
         avg_learning_rate += update_features(user_features, lightfm.user_features,
                                              lightfm.user_feature_gradients,
+                                             lightfm.item_feature_momentum,
                                              i, user_start_index, user_stop_index,
                                              loss * item_component, learning_rate, user_alpha)
 
@@ -385,13 +407,16 @@ cdef inline void warp_update(double loss,
     avg_learning_rate += update_biases(item_features, positive_item_start_index,
                                        positive_item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
+                                       lightfm.item_bias_momentum,
                                        -loss, learning_rate, item_alpha)
     avg_learning_rate += update_biases(item_features, negative_item_start_index,
                                        negative_item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
+                                       lightfm.item_bias_momentum,
                                        loss, learning_rate, item_alpha)
     avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
                                        lightfm.user_biases, lightfm.user_bias_gradients,
+                                       lightfm.user_bias_momentum,
                                        loss, learning_rate, user_alpha)
 
     # Update latent representations.
@@ -403,14 +428,17 @@ cdef inline void warp_update(double loss,
 
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
+                                             lightfm.item_feature_momentum,
                                              i, positive_item_start_index, positive_item_stop_index,
                                              -loss * user_component, learning_rate, item_alpha)
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
+                                             lightfm.item_feature_momentum,
                                              i, negative_item_start_index, negative_item_stop_index,
                                              loss * user_component, learning_rate, item_alpha)
         avg_learning_rate += update_features(user_features, lightfm.user_features,
                                              lightfm.user_feature_gradients,
+                                             lightfm.user_feature_momentum,
                                              i, user_start_index, user_stop_index,
                                              loss * (negative_item_component -
                                                      positive_item_component),
