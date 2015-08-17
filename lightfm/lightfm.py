@@ -247,13 +247,11 @@ class LightFM(object):
                     self.user_alpha,
                     num_threads)
         elif loss == 'warp-kos':
-            user_ids = np.arange(interactions.shape[0],
-                                 dtype=np.int32)
-            np.random.shuffle(user_ids)
             fit_warp_kos(CSRMatrix(item_features),
                          CSRMatrix(user_features),
                          CSRMatrix(interactions.tocsr()),
-                         user_ids,
+                         interactions.row,
+                         shuffle_indices,
                          lightfm_data,
                          self.learning_rate,
                          self.item_alpha,

@@ -669,6 +669,7 @@ def fit_warp_kos(CSRMatrix item_features,
                  CSRMatrix user_features,
                  CSRMatrix data,
                  int[::1] user_ids,
+                 int[::1] shuffle_indices,
                  FastLightFM lightfm,
                  double learning_rate,
                  double item_alpha,
@@ -709,7 +710,8 @@ def fit_warp_kos(CSRMatrix item_features,
         pos_pairs = <Pair*>malloc(sizeof(Pair) * n)
 
         for i in prange(no_examples):
-            user_id = user_ids[i]
+            row = shuffle_indices[i]
+            user_id = user_ids[row]
 
             compute_representation(user_features,
                                    lightfm.user_features,
