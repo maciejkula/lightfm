@@ -236,14 +236,15 @@ cdef inline double update_biases(CSRMatrix feature_indices,
                                  flt[::1] momentum,
                                  double gradient,
                                  double learning_rate,
-                                 double alpha,
-                                 int t) nogil:
+                                 double alpha) nogil:
     """
     Perform a SGD update of the bias terms.
     """
 
     cdef int i, feature
-    cdef double feature_weight, local_learning_rate, sum_learning_rate
+    cdef double feature_weight, local_learning_rate, sum_learning_rate, update
+    cdef double rho = 0.95
+    cdef double eps = 0.001
 
     sum_learning_rate = 0.0
 
@@ -252,10 +253,11 @@ cdef inline double update_biases(CSRMatrix feature_indices,
         feature = feature_indices.indices[i]
         feature_weight = feature_indices.data[i]
 
-        local_learning_rate = learning_rate / sqrt(gradients[feature])
-        momentum[feature] = 0.99 * momentum[feature] + (1 - 0.99) * gradient
-        biases[feature] -= local_learning_rate * feature_weight * momentum[feature]
-        gradients[feature] = 0.999 * gradients[feature] + (1 - 0.999) * gradient ** 2
+        gradients[feature] = rho * gradients[feature] + (1 - rho) * (feature_weight * gradient) ** 2
+        local_learning_rate = sqrt(momentum[feature] + eps) / sqrt(gradients[feature] + eps)
+        update = local_learning_rate * gradient * feature_weight
+        momentum[feature] = rho * momentum[feature] + (1 - rho) * update ** 2
+        biases[feature] -= update
 
         # Lazy regularization: scale up by the regularization
         # parameter.
@@ -275,14 +277,16 @@ cdef inline double update_features(CSRMatrix feature_indices,
                                    int stop,
                                    double gradient,
                                    double learning_rate,
-                                   double alpha
-                                   int t) nogil:
+                                   double alpha) nogil:
     """
     Update feature vectors.
     """
 
     cdef int i, feature,
-    cdef double feature_weight, local_learning_rate, sum_learning_rate
+    cdef double feature_weight, local_learning_rate, sum_learning_rate, update
+
+    cdef double rho = 0.95
+    cdef double eps = 0.001
 
     sum_learning_rate = 0.0
 
@@ -291,10 +295,13 @@ cdef inline double update_features(CSRMatrix feature_indices,
         feature = feature_indices.indices[i]
         feature_weight = feature_indices.data[i]
 
-        local_learning_rate = learning_rate / sqrt(gradients[feature, component]) + 0.00000001
-        momentum[feature, component] = 0.99 * momentum[feature, component] + (1 - 0.99) * gradient
-        features[feature, component] -= local_learning_rate * feature_weight * momentum[feature, component]
-        gradients[feature, component] = 0.999 * gradients[feature, component] + (1 - 0.999) * gradient ** 2
+        gradients[feature, component] = (rho * gradients[feature, component]
+                                         + (1 - rho) * (feature_weight * gradient) ** 2)
+        local_learning_rate = (sqrt(momentum[feature, component] + eps)
+                               / sqrt(gradients[feature, component] + eps))
+        update = local_learning_rate * gradient * feature_weight
+        momentum[feature, component] = rho * momentum[feature, component] + (1 - rho) * update ** 2
+        features[feature, component] -= update
 
         # Lazy regularization: scale up by the regularization
         # parameter.
