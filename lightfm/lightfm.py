@@ -11,7 +11,10 @@ from .lightfm_fast import (CSRMatrix, FastLightFM,
 
 class LightFM(object):
 
-    def __init__(self, no_components=10, k=5, n=10, learning_rate=0.05, item_alpha=0.0, user_alpha=0.0):
+    def __init__(self, no_components=10, k=5, n=10,
+                 learning_schedule='adagrad',
+                 learning_rate=0.05, rho=0.95, epsilon=0.000001,
+                 item_alpha=0.0, user_alpha=0.0):
         """
         Initialise the model.
 
@@ -28,12 +31,20 @@ class LightFM(object):
         assert no_components > 0
         assert k > 0
         assert n > 0
+        assert 0 < rho < 1
+        assert epsilon >= 0
+        assert learning_schedule in ('adagrad', 'adadelta')
+
+        self.learning_schedule = learning_schedule
 
         self.no_components = no_components
         self.learning_rate = learning_rate
 
         self.k = int(k)
         self.n = int(n)
+
+        self.rho = rho
+        self.epsilon = epsilon
 
         self.item_alpha = item_alpha
         self.user_alpha = user_alpha
@@ -74,6 +85,12 @@ class LightFM(object):
         self.user_biases = np.zeros(no_user_features, dtype=np.float32)
         self.user_bias_gradients = np.zeros_like(self.user_biases)
         self.user_bias_momentum = np.zeros_like(self.user_biases)
+
+        if self.learning_schedule == 'adagrad':
+            self.item_embedding_gradients += 1
+            self.item_bias_gradients += 1
+            self.user_embedding_gradients += 1
+            self.user_bias_gradients += 1
 
     def _construct_feature_matrices(self, n_users, n_items, user_features,
                                     item_features):
@@ -225,7 +242,11 @@ class LightFM(object):
                                    self.user_biases,
                                    self.user_bias_gradients,
                                    self.user_bias_momentum,
-                                   self.no_components)
+                                   self.no_components,
+                                   self.learning_schedule == 'adadelta',
+                                   self.learning_rate,
+                                   self.rho,
+                                   self.epsilon)
 
         # Call the estimation routines.
         if loss == 'warp':
@@ -322,7 +343,11 @@ class LightFM(object):
                                    self.user_biases,
                                    self.user_bias_gradients,
                                    self.user_bias_momentum,
-                                   self.no_components)
+                                   self.no_components,
+                                   self.learning_schedule == 'adadelta',
+                                   self.learning_rate,
+                                   self.rho,
+                                   self.epsilon)
 
         predictions = np.empty(len(user_ids), dtype=np.float64)
 
