@@ -184,27 +184,33 @@ def test_warp_precision_multithreaded():
 
 def test_warp_kos_precision():
 
+    # Remove all negative examples
+    training = train.copy()
+    training.data[training.data < 1] = 0
+    training = training.tocsr()
+    training.eliminate_zeros()
+
     model = LightFM(learning_rate=0.05, k=5)
 
-    model.fit_partial(train,
-                      epochs=600,
+    model.fit_partial(training,
+                      epochs=10,
                       loss='warp-kos')
 
     train_precision = precision_at_k(model,
-                                     train,
+                                     training,
                                      10)
     test_precision = precision_at_k(model,
                                     test,
                                     10)
 
-    full_train_auc = full_auc(model, train)
+    full_train_auc = full_auc(model, training)
     full_test_auc = full_auc(model, test)
 
-    assert train_precision > 0.45
-    assert test_precision > 0.07
+    assert train_precision > 0.44
+    assert test_precision > 0.06
 
-    assert full_train_auc > 0.94
-    assert full_test_auc > 0.9
+    assert full_train_auc > 0.9
+    assert full_test_auc > 0.88
 
 
 def test_warp_stability():
