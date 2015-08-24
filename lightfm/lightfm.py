@@ -34,6 +34,10 @@ class LightFM(object):
         - k-OS WARP: k-th order statistic loss [3]. A modification of WARP that uses the k-th
                      positive example for any given user as a basis for pairwise updates.
 
+        Two learning rate schedules are available:
+        - adagrad: [4]
+        - adadelta: [5]
+
         Parameters:
         - integer no_components: the dimensionality of the feature latent embeddings. Default: 10
         - int k: for k-OS training, the k-th positive example will be selected from the n positive
@@ -55,6 +59,11 @@ class LightFM(object):
         [3] Weston, Jason, Hector Yee, and Ron J. Weiss. "Learning to rank recommendations with
             the k-order statistic loss."
             Proceedings of the 7th ACM conference on Recommender systems. ACM, 2013.
+        [4] Duchi, John, Elad Hazan, and Yoram Singer. "Adaptive subgradient methods
+            for online learning and stochastic optimization."
+            The Journal of Machine Learning Research 12 (2011): 2121-2159.
+        [5] Zeiler, Matthew D. "ADADELTA: An adaptive learning rate method."
+            arXiv preprint arXiv:1212.5701 (2012).
         """
 
         assert item_alpha >= 0.0
