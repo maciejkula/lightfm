@@ -167,6 +167,8 @@ cdef class FastLightFM:
         self.item_scale = 1.0
         self.user_scale = 1.0
 
+        self.adadelta = adadelta
+
 
 cdef inline flt sigmoid(flt v) nogil:
     """
@@ -240,18 +242,18 @@ cdef inline flt compute_prediction_from_repr(flt *user_repr,
     return result
 
 
-cdef inline double update_biases(CSRMatrix feature_indices,
-                                 int start,
-                                 int stop,
-                                 flt[::1] biases,
-                                 flt[::1] gradients,
-                                 flt[::1] momentum,
-                                 double gradient,
-                                 int adadelta,
-                                 double learning_rate,
-                                 double alpha,
-                                 flt rho,
-                                 flt eps) nogil:
+cdef double update_biases(CSRMatrix feature_indices,
+                          int start,
+                          int stop,
+                          flt[::1] biases,
+                          flt[::1] gradients,
+                          flt[::1] momentum,
+                          double gradient,
+                          int adadelta,
+                          double learning_rate,
+                          double alpha,
+                          flt rho,
+                          flt eps) nogil:
     """
     Perform a SGD update of the bias terms.
     """
@@ -440,18 +442,18 @@ cdef inline void update(double loss,
     lightfm.user_scale *= (1 - user_alpha * avg_learning_rate)
 
 
-cdef inline void warp_update(double loss,
-                             CSRMatrix item_features,
-                             CSRMatrix user_features,
-                             int user_id,
-                             int positive_item_id,
-                             int negative_item_id,
-                             flt *user_repr,
-                             flt *pos_it_repr,
-                             flt *neg_it_repr,
-                             FastLightFM lightfm,
-                             double item_alpha,
-                             double user_alpha) nogil:
+cdef void warp_update(double loss,
+                      CSRMatrix item_features,
+                      CSRMatrix user_features,
+                      int user_id,
+                      int positive_item_id,
+                      int negative_item_id,
+                      flt *user_repr,
+                      flt *pos_it_repr,
+                      flt *neg_it_repr,
+                      FastLightFM lightfm,
+                      double item_alpha,
+                      double user_alpha) nogil:
     """
     Apply the gradient step.
     """
@@ -555,9 +557,9 @@ cdef inline void warp_update(double loss,
     lightfm.user_scale *= (1 - user_alpha * avg_learning_rate)
 
 
-cdef inline void regularize(FastLightFM lightfm,
-                            double item_alpha,
-                            double user_alpha) nogil:
+cdef void regularize(FastLightFM lightfm,
+                     double item_alpha,
+                     double user_alpha) nogil:
     """
     Apply accumulated L2 regularization to all features.
     """

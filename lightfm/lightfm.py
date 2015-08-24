@@ -55,13 +55,17 @@ class LightFM(object):
 
         self.item_embeddings = None
         self.item_embedding_gradients = None
+        self.item_embedding_momentum = None
         self.item_biases = None
         self.item_bias_gradients = None
+        self.item_bias_momentum = None
 
         self.user_embeddings = None
         self.user_embedding_gradients = None
+        self.user_embedding_momentum = None
         self.user_biases = None
         self.user_bias_gradients = None
+        self.user_bias_momentum = None
 
     def _initialize(self, no_components, no_item_features, no_user_features):
         """
@@ -243,7 +247,7 @@ class LightFM(object):
                                    self.user_bias_gradients,
                                    self.user_bias_momentum,
                                    self.no_components,
-                                   self.learning_schedule == 'adadelta',
+                                   int(self.learning_schedule == 'adadelta'),
                                    self.learning_rate,
                                    self.rho,
                                    self.epsilon)
@@ -331,6 +335,8 @@ class LightFM(object):
                                                            user_features,
                                                            item_features)
 
+
+
         lightfm_data = FastLightFM(self.item_embeddings,
                                    self.item_embedding_gradients,
                                    self.item_embedding_momentum,
@@ -344,7 +350,7 @@ class LightFM(object):
                                    self.user_bias_gradients,
                                    self.user_bias_momentum,
                                    self.no_components,
-                                   self.learning_schedule == 'adadelta',
+                                   int(self.learning_schedule == 'adadelta'),
                                    self.learning_rate,
                                    self.rho,
                                    self.epsilon)

@@ -182,6 +182,34 @@ def test_warp_precision_multithreaded():
     assert full_test_auc > 0.9
 
 
+def test_warp_precision_adadelta():
+
+    model = LightFM(learning_schedule='adadelta',
+                    rho=0.95,
+                    epsilon=0.000001)
+
+    model.fit_partial(train,
+                      epochs=10,
+                      loss='warp',
+                      num_threads=1)
+
+    train_precision = precision_at_k(model,
+                                     train,
+                                     10)
+    test_precision = precision_at_k(model,
+                                    test,
+                                    10)
+
+    full_train_auc = full_auc(model, train)
+    full_test_auc = full_auc(model, test)
+
+    assert train_precision > 0.45
+    assert test_precision > 0.07
+
+    assert full_train_auc > 0.94
+    assert full_test_auc > 0.9
+
+
 def test_warp_kos_precision():
 
     # Remove all negative examples
