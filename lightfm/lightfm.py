@@ -13,22 +13,48 @@ class LightFM(object):
 
     def __init__(self, no_components=10, k=5, n=10,
                  learning_schedule='adagrad',
+                 loss='logistic',
                  learning_rate=0.05, rho=0.95, epsilon=1e-6,
                  item_alpha=0.0, user_alpha=0.0):
         """
         Initialise the model.
+
+        Four loss functions are available:
+        - logistic: useful when both positive (1) and negative (-1) interactions
+                    are present.
+        - BPR: Bayesian Personalised Ranking [1] pairwise loss. Maximises the
+               prediction difference between a positive example and a randomly
+               chosen negative example. Useful when only positive interactions
+               are present and optimising ROC AUC is desired.
+        - WARP: Weighted Approximate-Rank Pairwise [2] loss. Maximises
+                the rank of positive examples by repeatedly sampling negative
+                examples until rank violating one is found. Useful when only
+                positive interactions are present and optimising the top of
+                the recommendation list (precision@k) is desired.
+        - k-OS WARP: k-th order statistic loss [3]. A modification of WARP that uses the k-th
+                     positive example for any given user as a basis for pairwise updates.
 
         Parameters:
         - integer no_components: the dimensionality of the feature latent embeddings. Default: 10
         - int k: for k-OS training, the k-th positive example will be selected from the n positive
                  examples sampled for every user. Default: 5
         - int n: for k-OS training, maximum number of positives sampled for each update. Default: 10
-        - string learning_schedule, one of ('adagrad', 'adadelta').
+        - string learning_schedule, one of ('adagrad', 'adadelta'). Default: 'adagrad'
+        - string loss ('logistic', 'bpr', 'warp', 'warp-kos'): the loss function to use. Default: 'logistic'
         - float learning_rate: initial learning rate for the adagrad learning schedule. Default: 0.05
         - float rho: moving average coefficient for the adadelta learning schedule. Default: 0.95
         - float epsilon: conditioning parameter for the adadelta learning schedule. Default: 1e-6
         - float item_alpha: L2 penalty on item features. Default: 0.0
         - float user_alpha: L2 penalty on user features. Default: 0.0
+
+        [1] Rendle, Steffen, et al. "BPR: Bayesian personalized ranking from implicit feedback."
+            Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
+            Intelligence. AUAI Press, 2009.
+        [2] Weston, Jason, Samy Bengio, and Nicolas Usunier. "Wsabie: Scaling up to large
+            vocabulary image annotation." IJCAI. Vol. 11. 2011.
+        [3] Weston, Jason, Hector Yee, and Ron J. Weiss. "Learning to rank recommendations with
+            the k-order statistic loss."
+            Proceedings of the 7th ACM conference on Recommender systems. ACM, 2013.
         """
 
         assert item_alpha >= 0.0
@@ -39,7 +65,9 @@ class LightFM(object):
         assert 0 < rho < 1
         assert epsilon >= 0
         assert learning_schedule in ('adagrad', 'adadelta')
+        assert loss in ('logistic', 'warp', 'bpr', 'warp-kos')
 
+        self.loss = loss
         self.learning_schedule = learning_schedule
 
         self.no_components = no_components
@@ -135,7 +163,7 @@ class LightFM(object):
         return user_features, item_features
 
     def fit(self, interactions, user_features=None, item_features=None,
-            loss='logistic', epochs=1, num_threads=1, verbose=False):
+            epochs=1, num_threads=1, verbose=False):
 
         # Discard old results, if any
         self._reset_state()
@@ -148,23 +176,10 @@ class LightFM(object):
                                 verbose=verbose)
 
     def fit_partial(self, interactions, user_features=None, item_features=None,
-                    loss='logistic', epochs=1, num_threads=1, verbose=False):
+                    epochs=1, num_threads=1, verbose=False):
         """
         Fit the model. Repeated calls to this function will resume training from
         the point where the last call finished.
-
-        Three loss functions are available:
-        - logistic: useful when both positive (1) and negative (-1) interactions
-                    are present.
-        - BPR: Bayesian Personalised Ranking [1] pairwise loss. Maximises the
-               prediction difference between a positive example and a randomly
-               chosen negative example. Useful when only positive interactions
-               are present and optimising ROC AUC is desired.
-        - WARP: Weighted Approximate-Rank Pairwise [2] loss. Maximises
-                the rank of positive examples by repeatedly sampling negative
-                examples until rank violating one is found. Useful when only
-                positive interactions are present and optimising the top of
-                the recommendation list (precision@k) is desired.
 
         Arguments:
         - coo_matrix interactions: matrix of shape [n_users, n_items] containing
@@ -175,21 +190,13 @@ class LightFM(object):
         - csr_matrix item_features: array of shape [n_items, n_item_features].
                                     Each row contains that item's weights
                                     over features.
-        - string loss ('logistic', 'bpr', 'warp'): the loss function to use.
+
         - int epochs: number of epochs to run. Default: 1
         - int num_threads: number of parallel computation threads to use. Should
                            not be higher than the number of physical cores.
                            Default: 1
         - bool verbose: whether to print progress messages.
-
-        [1] Rendle, Steffen, et al. "BPR: Bayesian personalized ranking from implicit feedback."
-            Proceedings of the Twenty-Fifth Conference on Uncertainty in Artificial
-            Intelligence. AUAI Press, 2009.
-        [2] Weston, Jason, Samy Bengio, and Nicolas Usunier. "Wsabie: Scaling up to large
-            vocabulary image annotation." IJCAI. Vol. 11. 2011.
         """
-
-        assert loss in ('logistic', 'warp', 'bpr', 'warp-kos')
 
         # We need this in the COO format.
         # If that's already true, this is a no-op.
@@ -226,7 +233,7 @@ class LightFM(object):
                             user_features,
                             interactions,
                             num_threads,
-                            loss)
+                            self.loss)
 
         return self
 
