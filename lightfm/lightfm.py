@@ -13,15 +13,20 @@ class LightFM(object):
 
     def __init__(self, no_components=10, k=5, n=10,
                  learning_schedule='adagrad',
-                 learning_rate=0.05, rho=0.95, epsilon=0.000001,
+                 learning_rate=0.05, rho=0.95, epsilon=1e-6,
                  item_alpha=0.0, user_alpha=0.0):
         """
         Initialise the model.
 
         Parameters:
         - integer no_components: the dimensionality of the feature latent embeddings. Default: 10
-        - int k: for k-OS training. Default: 5
-        - float learning_rate: initial learning rate. Default: 0.05
+        - int k: for k-OS training, the k-th positive example will be selected from the n positive
+                 examples sampled for every user. Default: 5
+        - int n: for k-OS training, maximum number of positives sampled for each update. Default: 10
+        - string learning_schedule, one of ('adagrad', 'adadelta').
+        - float learning_rate: initial learning rate for the adagrad learning schedule. Default: 0.05
+        - float rho: moving average coefficient for the adadelta learning schedule. Default: 0.95
+        - float epsilon: conditioning parameter for the adadelta learning schedule. Default: 1e-6
         - float item_alpha: L2 penalty on item features. Default: 0.0
         - float user_alpha: L2 penalty on user features. Default: 0.0
         """
