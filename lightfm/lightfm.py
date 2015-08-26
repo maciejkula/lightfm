@@ -356,8 +356,6 @@ class LightFM(object):
                                                            user_features,
                                                            item_features)
 
-
-
         lightfm_data = FastLightFM(self.item_embeddings,
                                    self.item_embedding_gradients,
                                    self.item_embedding_momentum,
