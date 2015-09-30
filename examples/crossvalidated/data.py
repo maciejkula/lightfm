@@ -92,7 +92,7 @@ def _read_raw_post_data():
             yield post_id, user_id, parent_post_id, tags
 
 
-def read_post_data():
+def read_data():
     """
     Construct a user-thread matrix, where a user interacts
     with a thread if they post an answer in it.
@@ -140,12 +140,7 @@ def read_post_data():
     tag_matrix = vectorizer.fit_transform(tag_list)
     assert tag_matrix.shape[0] == interaction_matrix.shape[1]
 
+    interaction_matrix = interaction_matrix.tocsr()
+    interaction_matrix.data = np.ones_like(interaction_matrix.data)
+
     return interaction_matrix, tag_matrix, vectorizer
-
-
-
-
-
-import itertools
-
-data = read_post_data()
