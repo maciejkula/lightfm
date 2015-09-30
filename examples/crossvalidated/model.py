@@ -63,19 +63,23 @@ def auc_content_models(models, interactions, post_features):
     return sum(auc_scores) / len(auc_scores)
 
 
-def fit_lightfm_model(interactions, post_features):
+def fit_lightfm_model(interactions, post_features=None, user_features=None):
 
     model = lightfm.LightFM(loss='warp',
+                            learning_rate=0.01,
+                            user_alpha=0.0001,
+                            item_alpha=0.0001,
                             no_components=30)
 
     model.fit(interactions,
               item_features=post_features,
+              user_features=user_features,
               epochs=10)
 
     return model
 
 
-def auc_lightfm(model, interactions, post_features):
+def auc_lightfm(model, interactions, post_features=None, user_features=None):
 
     no_users, no_items = interactions.shape
 
@@ -89,6 +93,7 @@ def auc_lightfm(model, interactions, post_features):
         predictions = model.predict(uid_array,
                                     pid_array,
                                     item_features=post_features,
+                                    user_features=user_features,
                                     num_threads=2)
         y = np.squeeze(np.array(interactions[i].todense()))
 

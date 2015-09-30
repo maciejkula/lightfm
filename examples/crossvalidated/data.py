@@ -1,5 +1,7 @@
 import codecs
+from HTMLParser import HTMLParser
 import os
+import re
 import subprocess
 
 from lxml import etree
@@ -11,6 +13,34 @@ import requests
 import scipy.sparse as sp
 
 from sklearn.feature_extraction import DictVectorizer
+
+
+class MLStripper(HTMLParser):
+
+    def __init__(self):
+        self.reset()
+        self.fed = []
+
+    def handle_data(self, d):
+
+        self.fed.append(d)
+
+    def get_data(self):
+
+        return ''.join(self.fed)
+
+
+def strip_tags(html):
+    s = MLStripper()
+    s.feed(html)
+    return s.get_data()
+
+
+def _process_body(body):
+
+    body = re.sub('[^a-zA-Z]+', ' ', body.lower())
+
+    return [x for x in body.split(' ') if len(x) > 2]
 
 
 def _get_data_path(fname):
@@ -69,6 +99,16 @@ def _process_post_tags(tags_string):
     return [x for x in tags_string.replace('<', ' ').replace('>', ' ').split(' ') if x]
 
 
+def _process_about(about):
+
+    clean_about = (strip_tags(about)
+                   .replace('\n', ' ')
+                   .lower())
+    tokens = _process_body(clean_about)
+
+    return tokens
+
+
 def _read_raw_post_data():
 
     with _get_raw_data('Posts.xml') as datafile:
@@ -92,6 +132,23 @@ def _read_raw_post_data():
             yield post_id, user_id, parent_post_id, tags
 
 
+def _read_raw_user_data():
+
+    with _get_raw_data('Users.xml') as datafile:
+        for i, line in enumerate(datafile):
+
+            try:
+                datum = dict(etree.fromstring(line).items())
+
+                user_id = datum['Id']
+                about_me = datum.get('AboutMe', '')
+
+                yield user_id, _process_about(about_me)
+
+            except etree.XMLSyntaxError:
+                pass
+
+
 def read_data():
     """
     Construct a user-thread matrix, where a user interacts
@@ -108,6 +165,9 @@ def read_data():
 
     for (post_id, user_id,
          parent_post_id, tags) in _read_raw_post_data():
+
+        if None in (post_id, user_id):
+            continue
 
         if parent_post_id is None:
             # This is a question
@@ -129,6 +189,12 @@ def read_data():
             pids.append(pid)
             data.append(1)
 
+    user_about = {}
+    for (user_id, about) in _read_raw_user_data():
+        uid = user_mapping.setdefault(user_id,
+                                      len(user_mapping))
+        user_about[uid] = {x: 1 for x in about + ['user_id:' + str(uid)]}
+
     interaction_matrix = sp.coo_matrix((data, (uids, pids)),
                                        shape=(len(user_mapping),
                                               len(post_mapping)),
@@ -140,7 +206,12 @@ def read_data():
     tag_matrix = vectorizer.fit_transform(tag_list)
     assert tag_matrix.shape[0] == interaction_matrix.shape[1]
 
+    about_list = [user_about.get(x, {}) for x in range(interaction_matrix.shape[0])]
+    about_vectorizer = DictVectorizer(dtype=np.int32)
+    about_matrix = about_vectorizer.fit_transform(about_list)
+    assert about_matrix.shape[0] == interaction_matrix.shape[0]
+
     interaction_matrix = interaction_matrix.tocsr()
     interaction_matrix.data = np.ones_like(interaction_matrix.data)
 
-    return interaction_matrix, tag_matrix, vectorizer
+    return interaction_matrix, tag_matrix, about_matrix, vectorizer, about_vectorizer
