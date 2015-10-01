@@ -67,6 +67,7 @@ def fit_lightfm_model(interactions, post_features=None, user_features=None):
 
     model = lightfm.LightFM(loss='warp',
                             learning_rate=0.01,
+                            learning_schedule='adagrad',
                             user_alpha=0.0001,
                             item_alpha=0.0001,
                             no_components=30)
@@ -74,7 +75,8 @@ def fit_lightfm_model(interactions, post_features=None, user_features=None):
     model.fit(interactions,
               item_features=post_features,
               user_features=user_features,
-              epochs=10)
+              num_threads=4,
+              epochs=30)
 
     return model
 
@@ -94,7 +96,7 @@ def auc_lightfm(model, interactions, post_features=None, user_features=None):
                                     pid_array,
                                     item_features=post_features,
                                     user_features=user_features,
-                                    num_threads=2)
+                                    num_threads=4)
         y = np.squeeze(np.array(interactions[i].todense()))
 
         try:
@@ -104,3 +106,15 @@ def auc_lightfm(model, interactions, post_features=None, user_features=None):
             pass
 
     return sum(scores) / len(scores)
+
+
+def similar_tags(model, vectorizer, tag, number=10):
+
+    tag_idx = vectorizer.vocabulary_[tag]
+
+    tag_embedding = model.item_embeddings[tag_idx]
+
+    sim = (np.dot(model.item_embeddings, tag_embedding)
+           / np.linalg.norm(model.item_embeddings, axis=1))
+
+    return np.array(vectorizer.get_feature_names())[np.argsort(-sim)[1:1 + number]].tolist()

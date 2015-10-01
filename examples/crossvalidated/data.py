@@ -60,7 +60,7 @@ def _download():
     Download the dataset.
     """
 
-    url = 'https://archive.org/download/stackexchange/stats.stackexchange.com.7z'
+    url = 'http://archive.org/download/stackexchange/stats.stackexchange.com.7z'
     req = requests.get(url, stream=True)
 
     download_path = _get_download_path()
@@ -129,7 +129,7 @@ def _read_raw_post_data():
             except etree.XMLSyntaxError:
                 continue
 
-            yield post_id, user_id, parent_post_id, tags
+            yield int(post_id), int(user_id), int(parent_post_id) if parent_post_id else None, tags
 
 
 def _read_raw_user_data():
@@ -143,7 +143,7 @@ def _read_raw_user_data():
                 user_id = datum['Id']
                 about_me = datum.get('AboutMe', '')
 
-                yield user_id, _process_about(about_me)
+                yield int(user_id), _process_about(about_me)
 
             except etree.XMLSyntaxError:
                 pass
@@ -169,6 +169,9 @@ def read_data():
         if None in (post_id, user_id):
             continue
 
+        if user_id == -1:
+            continue
+
         if parent_post_id is None:
             # This is a question
 
@@ -178,6 +181,9 @@ def read_data():
 
             for tag in tags:
                 tag_dict[tag] = 1
+
+            tag_dict['intercept'] = 1
+
         else:
             # This is an answer
             uid = user_mapping.setdefault(user_id,
@@ -191,8 +197,14 @@ def read_data():
 
     user_about = {}
     for (user_id, about) in _read_raw_user_data():
-        uid = user_mapping.setdefault(user_id,
-                                      len(user_mapping))
+
+        if user_id == -1:
+            continue
+
+        if user_id not in user_mapping:
+            continue
+
+        uid = user_mapping[user_id]
         user_about[uid] = {x: 1 for x in about + ['user_id:' + str(uid)]}
 
     interaction_matrix = sp.coo_matrix((data, (uids, pids)),
@@ -200,18 +212,27 @@ def read_data():
                                               len(post_mapping)),
                                        dtype=np.int32)
 
+    # Select only those questions that have any answers
+    answered = np.squeeze(np.array(interaction_matrix.sum(axis=0))) > 0
+    interaction_matrix = interaction_matrix.tocsr()[:, answered]
+    interaction_matrix.data = np.ones_like(interaction_matrix.data)
+
+    active_users = np.squeeze(np.array(interaction_matrix.sum(axis=1))) > 1
+    interaction_matrix = interaction_matrix[active_users]
+
     tag_list = [question_tags.get(x, {}) for x in range(len(post_mapping))]
 
     vectorizer = DictVectorizer(dtype=np.int32)
     tag_matrix = vectorizer.fit_transform(tag_list)
+    tag_matrix = tag_matrix.tocsr()[answered]
     assert tag_matrix.shape[0] == interaction_matrix.shape[1]
 
-    about_list = [user_about.get(x, {}) for x in range(interaction_matrix.shape[0])]
+    about_list = [user_about.get(x, {}) for x in range(len(user_mapping))]
     about_vectorizer = DictVectorizer(dtype=np.int32)
     about_matrix = about_vectorizer.fit_transform(about_list)
+    about_matrix = about_matrix.tocsr()[active_users]
     assert about_matrix.shape[0] == interaction_matrix.shape[0]
 
-    interaction_matrix = interaction_matrix.tocsr()
-    interaction_matrix.data = np.ones_like(interaction_matrix.data)
+    assert (np.squeeze(np.array(about_matrix.sum(axis=1))) > 0).all()
 
     return interaction_matrix, tag_matrix, about_matrix, vectorizer, about_vectorizer
