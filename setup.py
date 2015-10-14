@@ -11,14 +11,29 @@ from setuptools.command.test import test as TestCommand
 
 def remove_illegal_compiler_flags():
 
+    config_vars = setuptools.distutils.sysconfig.get_config_vars()
+    illegal_flags = ('-arch i386', '-arch x86_64', '-Wshorten-64-to-32')
+    flag_strings = [name for (name, value) in config_vars.items()
+                    if isinstance(value, basestring) and 'flag' in name.lower()]
     # This is an issue where building against default OSX
     # Python distribution. Its default CFLAGS are for clang
     # and do not work with gcc. We need to override them here
     # to make it work.
-    flags = setuptools.distutils.sysconfig._config_vars['CFLAGS']
-    fixed_flags = flags.replace('-Wshorten-64-to-32', '')
+    # We also don't want to build a far (multiarchitecture) binary,
+    # but just for the current architecture.
 
-    setuptools.distutils.sysconfig._config_vars['CFLAGS'] = fixed_flags
+    config_vars = setuptools.distutils.sysconfig._config_vars
+
+    for flag_string in flag_strings:
+
+        flags = config_vars[flag_string]
+
+        for illegal_flag in illegal_flags:
+            flags = flags.replace(illegal_flag, '')
+
+        config_vars[flag_string] = flags
+
+        print (flag_string, flags)
 
 
 def define_extensions(file_ext):
