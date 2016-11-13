@@ -4,7 +4,7 @@ import numpy as np
 
 import scipy.sparse as sp
 
-from ._lightfm_fast import (CSRMatrix, FastLightFM,
+from ._lightfm_fast import (CSRMatrix, FastLightFM, Optimizer,
                             fit_bpr, fit_logistic, fit_warp,
                             fit_warp_kos, predict_lightfm, predict_ranks)
 
@@ -13,6 +13,9 @@ __all__ = ['LightFM']
 
 
 CYTHON_DTYPE = np.float32
+LEARNING_SCHEDULE = {'adagrad': 0,
+                     'adadelta': 1,
+                     'adam': 2}
 
 
 class LightFM(object):
@@ -294,6 +297,14 @@ class LightFM(object):
 
     def _get_lightfm_data(self):
 
+        optimizer = Optimizer(self.learning_rate,
+                              LEARNING_SCHEDULE[self.learning_schedule],
+                              self.rho,
+                              self.epsilon,
+                              0.0,
+                              0.0,
+                              0.0)
+
         lightfm_data = FastLightFM(self.item_embeddings,
                                    self.item_embedding_gradients,
                                    self.item_embedding_momentum,
@@ -307,10 +318,7 @@ class LightFM(object):
                                    self.user_bias_gradients,
                                    self.user_bias_momentum,
                                    self.no_components,
-                                   int(self.learning_schedule == 'adadelta'),
-                                   self.learning_rate,
-                                   self.rho,
-                                   self.epsilon,
+                                   optimizer,
                                    self.max_sampled)
 
         return lightfm_data

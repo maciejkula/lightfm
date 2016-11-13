@@ -135,6 +135,41 @@ cdef int flt_compare(const_void *a, const_void *b) nogil:
         return 0
 
 
+cdef int ADAGRAD = 0
+cdef int ADADELTA = 1
+cdef int ADAM = 2
+
+
+cdef class Optimizer:
+
+    cdef int optimizer_type
+    cdef flt learning_rate
+
+    # Adadelta parameters
+    cdef flt rho
+    cdef flt eps
+
+    # Adam parameters
+    cdef flt beta_1
+    cdef flt beta_2
+    cdef flt epsilon
+
+    def __init__(self, learning_rate, optimizer_type, rho, eps, beta_1, beta_2, epsilon):
+
+        if optimizer_type not in (ADAGRAD, ADADELTA, ADAM):
+            raise Exception('Unknown optimizer type.')
+
+        self.optimizer_type = optimizer_type
+        self.learning_rate = learning_rate
+
+        self.rho = rho
+        self.eps = eps
+
+        self.beta_1 = beta_1
+        self.beta_2 = beta_2
+        self.epsilon = epsilon
+
+
 cdef class CSRMatrix:
     """
     Utility class for accessing elements
@@ -197,11 +232,9 @@ cdef class FastLightFM:
     cdef flt[::1] user_bias_momentum
 
     cdef int no_components
-    cdef int adadelta
-    cdef flt learning_rate
-    cdef flt rho
-    cdef flt eps
     cdef int max_sampled
+
+    cdef Optimizer optimizer
 
     cdef double item_scale
     cdef double user_scale
@@ -220,10 +253,7 @@ cdef class FastLightFM:
                  flt[::1] user_bias_gradients,
                  flt[::1] user_bias_momentum,
                  int no_components,
-                 int adadelta,
-                 flt learning_rate,
-                 flt rho,
-                 flt epsilon,
+                 Optimizer optimizer,
                  int max_sampled):
 
         self.item_features = item_features
@@ -240,14 +270,10 @@ cdef class FastLightFM:
         self.user_bias_momentum = user_bias_momentum
 
         self.no_components = no_components
-        self.learning_rate = learning_rate
-        self.rho = rho
-        self.eps = epsilon
+        self.optimizer = optimizer
 
         self.item_scale = 1.0
         self.user_scale = 1.0
-
-        self.adadelta = adadelta
 
         self.max_sampled = max_sampled
 
@@ -334,11 +360,8 @@ cdef double update_biases(CSRMatrix feature_indices,
                           flt[::1] gradients,
                           flt[::1] momentum,
                           double gradient,
-                          int adadelta,
-                          double learning_rate,
                           double alpha,
-                          flt rho,
-                          flt eps) nogil:
+                          Optimizer optimizer) nogil:
     """
     Perform a SGD update of the bias terms.
     """
@@ -346,9 +369,13 @@ cdef double update_biases(CSRMatrix feature_indices,
     cdef int i, feature
     cdef double feature_weight, local_learning_rate, sum_learning_rate, update
 
+    cdef flt learning_rate = optimizer.learning_rate,
+    cdef flt rho = optimizer.rho
+    cdef flt eps = optimizer.eps
+
     sum_learning_rate = 0.0
 
-    if adadelta:
+    if optimizer.optimizer_type == ADADELTA:
         for i in range(start, stop):
 
             feature = feature_indices.indices[i]
@@ -392,11 +419,8 @@ cdef inline double update_features(CSRMatrix feature_indices,
                                    int start,
                                    int stop,
                                    double gradient,
-                                   int adadelta,
-                                   double learning_rate,
                                    double alpha,
-                                   flt rho,
-                                   flt eps) nogil:
+                                   Optimizer optimizer) nogil:
     """
     Update feature vectors.
     """
@@ -406,7 +430,11 @@ cdef inline double update_features(CSRMatrix feature_indices,
 
     sum_learning_rate = 0.0
 
-    if adadelta:
+    cdef flt learning_rate = optimizer.learning_rate,
+    cdef flt rho = optimizer.rho
+    cdef flt eps = optimizer.eps
+
+    if optimizer.optimizer_type == ADADELTA:
         for i in range(start, stop):
 
             feature = feature_indices.indices[i]
@@ -476,20 +504,14 @@ cdef inline void update(double loss,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
                                        lightfm.item_bias_momentum,
                                        loss,
-                                       lightfm.adadelta,
-                                       lightfm.learning_rate,
                                        item_alpha,
-                                       lightfm.rho,
-                                       lightfm.eps)
+                                       lightfm.optimizer)
     avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
                                        lightfm.user_biases, lightfm.user_bias_gradients,
                                        lightfm.user_bias_momentum,
                                        loss,
-                                       lightfm.adadelta,
-                                       lightfm.learning_rate,
                                        user_alpha,
-                                       lightfm.rho,
-                                       lightfm.eps)
+                                       lightfm.optimizer)
 
     # Update latent representations.
     for i in range(lightfm.no_components):
@@ -502,21 +524,15 @@ cdef inline void update(double loss,
                                              lightfm.item_feature_momentum,
                                              i, item_start_index, item_stop_index,
                                              loss * user_component,
-                                             lightfm.adadelta,
-                                             lightfm.learning_rate,
                                              item_alpha,
-                                             lightfm.rho,
-                                             lightfm.eps)
+                                             lightfm.optimizer)
         avg_learning_rate += update_features(user_features, lightfm.user_features,
                                              lightfm.user_feature_gradients,
                                              lightfm.user_feature_momentum,
                                              i, user_start_index, user_stop_index,
                                              loss * item_component,
-                                             lightfm.adadelta,
-                                             lightfm.learning_rate,
                                              user_alpha,
-                                             lightfm.rho,
-                                             lightfm.eps)
+                                             lightfm.optimizer)
 
     avg_learning_rate /= ((lightfm.no_components + 1) * (user_stop_index - user_start_index)
                           + (lightfm.no_components + 1) * (item_stop_index - item_start_index))
@@ -566,30 +582,21 @@ cdef void warp_update(double loss,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
                                        lightfm.item_bias_momentum,
                                        -loss,
-                                       lightfm.adadelta,
-                                       lightfm.learning_rate,
                                        item_alpha,
-                                       lightfm.rho,
-                                       lightfm.eps)
+                                       lightfm.optimizer)
     avg_learning_rate += update_biases(item_features, negative_item_start_index,
                                        negative_item_stop_index,
                                        lightfm.item_biases, lightfm.item_bias_gradients,
                                        lightfm.item_bias_momentum,
                                        loss,
-                                       lightfm.adadelta,
-                                       lightfm.learning_rate,
                                        item_alpha,
-                                       lightfm.rho,
-                                       lightfm.eps)
+                                       lightfm.optimizer)
     avg_learning_rate += update_biases(user_features, user_start_index, user_stop_index,
                                        lightfm.user_biases, lightfm.user_bias_gradients,
                                        lightfm.user_bias_momentum,
                                        loss,
-                                       lightfm.adadelta,
-                                       lightfm.learning_rate,
                                        user_alpha,
-                                       lightfm.rho,
-                                       lightfm.eps)
+                                       lightfm.optimizer)
 
     # Update latent representations.
     for i in range(lightfm.no_components):
@@ -603,32 +610,23 @@ cdef void warp_update(double loss,
                                              lightfm.item_feature_momentum,
                                              i, positive_item_start_index, positive_item_stop_index,
                                              -loss * user_component,
-                                             lightfm.adadelta,
-                                             lightfm.learning_rate,
                                              item_alpha,
-                                             lightfm.rho,
-                                             lightfm.eps)
+                                             lightfm.optimizer)
         avg_learning_rate += update_features(item_features, lightfm.item_features,
                                              lightfm.item_feature_gradients,
                                              lightfm.item_feature_momentum,
                                              i, negative_item_start_index, negative_item_stop_index,
                                              loss * user_component,
-                                             lightfm.adadelta,
-                                             lightfm.learning_rate,
                                              item_alpha,
-                                             lightfm.rho,
-                                             lightfm.eps)
+                                             lightfm.optimizer)
         avg_learning_rate += update_features(user_features, lightfm.user_features,
                                              lightfm.user_feature_gradients,
                                              lightfm.user_feature_momentum,
                                              i, user_start_index, user_stop_index,
                                              loss * (negative_item_component -
                                                      positive_item_component),
-                                             lightfm.adadelta,
-                                             lightfm.learning_rate,
                                              user_alpha,
-                                             lightfm.rho,
-                                             lightfm.eps)
+                                             lightfm.optimizer)
 
     avg_learning_rate /= ((lightfm.no_components + 1) * (user_stop_index - user_start_index)
                           + (lightfm.no_components + 1) *
