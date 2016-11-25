@@ -153,6 +153,7 @@ cdef class Optimizer:
     cdef flt beta_1
     cdef flt beta_2
     cdef flt epsilon
+    cdef int num_updates
 
     def __init__(self, learning_rate, optimizer_type, rho, eps, beta_1, beta_2, epsilon):
 
@@ -168,6 +169,7 @@ cdef class Optimizer:
         self.beta_1 = beta_1
         self.beta_2 = beta_2
         self.epsilon = epsilon
+        self.num_updates = 0
 
 
 cdef class CSRMatrix:
@@ -353,6 +355,59 @@ cdef inline flt compute_prediction_from_repr(flt *user_repr,
     return result
 
 
+cdef inline double update_biases_adam(CSRMatrix feature_indices,
+                          int start,
+                          int stop,
+                          flt[::1] biases,
+                          flt[::1] first_moment_array,
+                          flt[::1] second_moment_array,
+                          double gradient,
+                          double alpha,
+                          Optimizer optimizer) nogil:
+
+    cdef int i, feature
+    cdef double feature_weight, local_learning_rate, sum_learning_rate, update
+    cdef flt learning_rate = optimizer.learning_rate
+    cdef flt beta_1 = optimizer.beta_1
+    cdef flt beta_2 = optimizer.beta_2
+    cdef flt epsilon = optimizer.epsilon
+
+    sum_learning_rate = 0.0
+
+    cdef flt weighted_gradient, first_moment, second_moment
+
+    for i in range(start, stop):
+
+        feature = feature_indices.indices[i]
+        feature_weight = feature_indices.data[i]
+
+        weighted_gradient = feature_weight * gradient
+
+        first_moment_array[feature] = (
+            beta_1 * first_moment_array[feature]
+            + (1 - beta_1) * (weighted_gradient) ** 2
+        )
+        second_moment_array[feature] = (
+            beta_2 * second_moment_array[feature] + (1 - beta_2) * weighted_gradient ** 2
+        )
+
+        first_moment = first_moment_array[feature] / (1.0 - beta_1 ** optimizer.num_updates)
+        second_moment = second_moment_array[feature] / (1.0 - beta_2 ** optimizer.num_updates)
+
+        local_learning_rate = learning_rate * first_moment / (second_moment + epsilon)
+
+        update = local_learning_rate * weighted_gradient
+        biases[feature] -= update
+
+        # Lazy regularization: scale up by the regularization
+        # parameter.
+        biases[feature] *= (1.0 + alpha * local_learning_rate)
+
+        sum_learning_rate += local_learning_rate
+
+    return sum_learning_rate
+
+
 cdef double update_biases(CSRMatrix feature_indices,
                           int start,
                           int stop,
@@ -411,6 +466,61 @@ cdef double update_biases(CSRMatrix feature_indices,
     return sum_learning_rate
 
 
+cdef inline double update_features_adam(CSRMatrix feature_indices,
+                                        flt[:, ::1] features,
+                                        flt[:, ::1] first_moment_array,
+                                        flt[:, ::1] second_moment_array,
+                                        int component,
+                                        int start,
+                                        int stop,
+                                        double gradient,
+                                        double alpha,
+                                        Optimizer optimizer) nogil:
+
+    cdef int i, feature,
+    cdef double feature_weight, local_learning_rate, sum_learning_rate, update
+
+    cdef flt learning_rate = optimizer.learning_rate
+    cdef flt beta_1 = optimizer.beta_1
+    cdef flt beta_2 = optimizer.beta_2
+    cdef flt epsilon = optimizer.epsilon
+
+    sum_learning_rate = 0.0
+
+    cdef flt weighted_gradient, first_moment, second_moment
+
+    for i in range(start, stop):
+
+        feature = feature_indices.indices[i]
+        feature_weight = feature_indices.data[i]
+
+        weighted_gradient = feature_weight * gradient
+
+        first_moment_array[feature, component] = (
+            beta_1 * first_moment_array[feature, component]
+            + (1 - beta_1) * (weighted_gradient) ** 2
+        )
+        second_moment_array[feature, component] = (
+            beta_2 * second_moment_array[feature, component] + (1 - beta_2) * weighted_gradient ** 2
+        )
+
+        first_moment = first_moment_array[feature, component] / (1.0 - beta_1 ** optimizer.num_updates)
+        second_moment = second_moment_array[feature, component] / (1.0 - beta_2 ** optimizer.num_updates)
+
+        local_learning_rate = learning_rate * first_moment / (second_moment + epsilon)
+
+        update = local_learning_rate * weighted_gradient
+        features[feature, component] -= update
+
+        # Lazy regularization: scale up by the regularization
+        # parameter.
+        features[feature, component] *= (1.0 + alpha * local_learning_rate)
+
+        sum_learning_rate += local_learning_rate
+
+    return local_learning_rate
+
+
 cdef inline double update_features(CSRMatrix feature_indices,
                                    flt[:, ::1] features,
                                    flt[:, ::1] gradients,
@@ -453,6 +563,19 @@ cdef inline double update_features(CSRMatrix feature_indices,
             features[feature, component] *= (1.0 + alpha * local_learning_rate)
 
             sum_learning_rate += local_learning_rate
+    elif optimizer.optimizer_type == ADAM:
+        sum_learning_rate = update_features_adam(
+            feature_indices,
+            features,
+            gradients,
+            momentum,
+            component,
+            start,
+            stop,
+            gradient,
+            alpha,
+            optimizer
+        )
     else:
         for i in range(start, stop):
 
